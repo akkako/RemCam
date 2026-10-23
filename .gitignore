@@ -1,0 +1,49 @@
+# ---- Gradle / build outputs ----
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ---- Android Studio / IntelliJ ----
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+.navigation/
+captures/
+
+# ---- Local machine configuration ----
+local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# ---- Kotlin / Java caches ----
+.kotlin/
+.externalNativeBuild/
+.cxx/
+*.hprof
+
+# ---- Android packaging artifacts ----
+*.apk
+*.ap_
+*.aab
+*.apks
+*.idsig
+output-metadata.json
+
+# ---- Logs ----
+*.log
+
+# ---- Verification / screenshots ----
+snap/
+screenshots/
+
+# ---- OS / editor noise ----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.zcode/
