@@ -5,8 +5,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.PointF
 import android.view.TextureView
-import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.remcam.streaming.CameraCapabilities
@@ -29,7 +29,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val capabilityReader = CameraCapabilityReader(application)
     private val engine = RemCamEngine.get(application)
-    private val capabilitiesByLens = mutableMapOf<Int, CameraCapabilities>()
+    private val capabilitiesByCameraId = mutableMapOf<String, CameraCapabilities>()
     private val encoderMaxBitrateMbps: Int? by lazy {
         capabilityReader.readAvcEncoderMaxBitrateMbps()
     }
@@ -40,8 +40,8 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
     private var screenVisible = false
     private var previewAttached = false
     private var previewGeneration = 0
-    private var openedLens: Int? = null
-    private var openingLens: Int? = null
+    private var openedCameraId: String? = null
+    private var openingCameraId: String? = null
     private var previewJob: Job? = null
 
     private var lastEngineErrorId = 0L
@@ -104,7 +104,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
             !_uiState.value.isStreaming &&
             !_uiState.value.isBusy
         ) {
-            openPreviewForCurrentLens()
+            openPreviewForCurrentCamera()
         }
     }
 
@@ -113,8 +113,8 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         previewGeneration++
         previewJob?.cancel()
         previewJob = null
-        openedLens = null
-        openingLens = null
+        openedCameraId = null
+        openingCameraId = null
         engine.onUiHidden()
 
         val state = _uiState.value
@@ -144,13 +144,13 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
             !_uiState.value.isStreaming &&
             !_uiState.value.isBusy
         ) {
-            openPreviewForCurrentLens()
+            openPreviewForCurrentCamera()
         }
     }
 
     fun onPreviewDetached(view: TextureView) {
         previewAttached = false
-        openedLens = null
+        openedCameraId = null
         engine.detachPreview(view)
     }
 
@@ -158,32 +158,40 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update {
             it.copy(
                 hasCameraPermission = granted,
-                errorMessage = if (granted) it.errorMessage else "Camera permission denied"
+                errorMessage = if (granted) {
+                    it.errorMessage
+                } else {
+                    string(R.string.error_camera_permission_denied)
+                }
             )
         }
         if (granted) {
             refreshNetwork()
-            openPreviewForCurrentLens()
+            if (_uiState.value.availableCameras.isEmpty()) {
+                refreshCameraOptions()
+            }
+            openPreviewForCurrentCamera()
         }
     }
 
     fun retryPreview() {
         if (!screenVisible || !previewAttached) return
-        openPreviewForCurrentLens(force = true)
+        openPreviewForCurrentCamera(force = true)
     }
 
-    private fun openPreviewForCurrentLens(force: Boolean = false) {
+    private fun openPreviewForCurrentCamera(force: Boolean = false) {
         val state = _uiState.value
         if (!state.hasCameraPermission || !screenVisible || !previewAttached) return
         if (state.isStreaming || state.isBusy) return
-        if (!force && state.cameraReady && openedLens == state.selectedCameraLens) return
-        if (!force && previewJob?.isActive == true && openingLens == state.selectedCameraLens) return
+        val cameraId = state.selectedCameraId
+        if (cameraId.isBlank()) return
+        if (!force && state.cameraReady && openedCameraId == cameraId) return
+        if (!force && previewJob?.isActive == true && openingCameraId == cameraId) return
 
         val generation = ++previewGeneration
-        val lens = state.selectedCameraLens
         val fps = state.selectedFps.fps
         val resolution = state.selectedResolution
-        openingLens = lens
+        openingCameraId = cameraId
         _uiState.update { it.copy(cameraReady = false) }
         previewJob?.cancel()
         previewJob = viewModelScope.launch {
@@ -191,11 +199,11 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
                 runCatching { engine.closeCamera() }
                 if (generation != previewGeneration) return@launch
             }
-            val result = engine.openPreview(lens, fps, resolution)
+            val result = engine.openPreview(cameraId, fps, resolution)
             if (generation != previewGeneration) return@launch
-            openingLens = null
+            openingCameraId = null
             result.onSuccess {
-                openedLens = lens
+                openedCameraId = cameraId
                 _uiState.update {
                     it.copy(
                         cameraReady = true,
@@ -206,11 +214,11 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }.onFailure { error ->
                 if (error is CancellationException) return@onFailure
-                openedLens = null
+                openedCameraId = null
                 _uiState.update {
                     it.copy(
                         cameraReady = false,
-                        errorMessage = error.message ?: "Unable to open camera"
+                        errorMessage = error.message ?: string(R.string.error_unable_open_camera)
                     )
                 }
             }
@@ -221,21 +229,17 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
     // Camera switching
     // ---------------------------------------------------------------------
 
-    fun switchCamera() {
+    fun selectCamera(cameraId: String) {
         val state = _uiState.value
-        if (state.isStreaming || state.isBusy || state.availableLenses.size < 2) return
-        val currentIndex = state.availableLenses.indexOf(state.selectedCameraLens)
-        val nextIndex = if (currentIndex < 0) {
-            0
-        } else {
-            (currentIndex + 1) % state.availableLenses.size
-        }
-        applyLens(state.availableLenses[nextIndex])
+        if (state.isStreaming || state.isBusy) return
+        if (cameraId == state.selectedCameraId) return
+        if (state.availableCameras.none { it.id == cameraId }) return
+        applyCamera(cameraId)
     }
 
-    private fun applyLens(lens: Int) {
+    private fun applyCamera(cameraId: String, reopen: Boolean = true) {
         val state = _uiState.value
-        val capabilities = capabilitiesFor(lens)
+        val capabilities = capabilitiesFor(cameraId)
         val resolutions = capabilities.resolutions.ifEmpty { state.availableResolutions }
         val resolution = resolutions.firstOrNull { it == state.selectedResolution }
             ?: resolutions.firstOrNull { it.width == 1280 && it.height == 720 }
@@ -251,7 +255,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         val manualMode = state.manualMode && capabilities.manualCapabilities != null
 
         val nextState = state.copy(
-            selectedCameraLens = lens,
+            selectedCameraId = cameraId,
             sensorOrientation = capabilities.sensorOrientation,
             selectedResolution = resolution,
             selectedFps = fps,
@@ -272,13 +276,13 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
 
         previewGeneration++
         previewJob?.cancel()
-        openedLens = null
+        openedCameraId = null
         _uiState.value = nextState
         engine.setTorch(false)
         engine.updateManualControls(manualValues)
         engine.setManualControlsEnabled(manualMode)
         saveSettings(nextState)
-        openPreviewForCurrentLens(force = true)
+        if (reopen) openPreviewForCurrentCamera(force = true)
     }
 
     // ---------------------------------------------------------------------
@@ -317,7 +321,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         val state = _uiState.value
         val clamped = clampManualValues(
             values = values,
-            capabilities = capabilitiesFor(state.selectedCameraLens),
+            capabilities = capabilitiesFor(state.selectedCameraId),
             fps = state.selectedFps.fps
         )
         engine.updateManualControls(clamped)
@@ -384,7 +388,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.update {
                 it.copy(
                     streamStatus = StreamStatus.ERROR,
-                    errorMessage = "No local network address found"
+                    errorMessage = string(R.string.error_no_local_address)
                 )
             }
             return
@@ -398,7 +402,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         }
         engine.startStreaming(
             request = StreamRequest(
-                lensFacing = current.selectedCameraLens,
+                cameraId = current.selectedCameraId,
                 resolution = current.selectedResolution,
                 fps = current.selectedFps,
                 bitrate = current.selectedBitrate,
@@ -450,7 +454,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         val state = _uiState.value
         if (state.isStreaming || state.isBusy) return
         if (preset !in state.availableResolutions) return
-        val capabilities = capabilitiesFor(state.selectedCameraLens)
+        val capabilities = capabilitiesFor(state.selectedCameraId)
         val fpsOptions = capabilities.fpsOptionsFor(preset).ifEmpty {
             state.availableFpsOptions.ifEmpty { listOf(FpsPreset.FPS_30) }
         }
@@ -470,7 +474,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         // Keep the preview's buffer/framing in sync with the selected stream
         // size instead of updating it only when streaming starts.
         if (!state.isStreaming && !state.isBusy) {
-            openPreviewForCurrentLens(force = true)
+            openPreviewForCurrentCamera(force = true)
         }
     }
 
@@ -478,7 +482,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         val state = _uiState.value
         if (state.isStreaming || state.isBusy) return
         if (preset !in state.availableFpsOptions) return
-        val capabilities = capabilitiesFor(state.selectedCameraLens)
+        val capabilities = capabilitiesFor(state.selectedCameraId)
         val values = clampManualValues(state.manualValues, capabilities, preset.fps)
         _uiState.update {
             it.copy(selectedFps = preset, manualValues = values).also(::saveSettings)
@@ -527,43 +531,68 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
     // ---------------------------------------------------------------------
 
     private fun validateStartRequest(state: RemCamUiState): String? {
-        if (!state.hasCameraPermission) return "Camera permission denied"
+        if (!state.hasCameraPermission) {
+            return string(R.string.error_camera_permission_denied)
+        }
+        if (state.selectedCameraId.isBlank() ||
+            state.availableCameras.none { it.id == state.selectedCameraId }
+        ) {
+            return string(R.string.error_camera_not_available)
+        }
         if (!state.hasLocalAddress) {
-            return "No local network address found. Connect Wi-Fi or enable USB tethering."
+            return string(R.string.error_no_local_network)
         }
         if (state.availableResolutions.isEmpty()) {
-            return "Camera capabilities are unavailable"
+            return string(R.string.error_camera_capabilities_unavailable)
         }
         if (state.selectedResolution !in state.availableResolutions) {
-            return "Selected resolution is not supported by the current camera"
+            return string(R.string.error_resolution_unsupported)
         }
         if (state.selectedFps !in state.availableFpsOptions) {
-            return "Selected frame rate is not supported for ${state.selectedResolution.label}"
+            return string(R.string.error_fps_unsupported, state.selectedResolution.label)
         }
         val port = state.portInput.toIntOrNull()
         if (port == null || port !in 1..65535) {
-            return "Enter a valid RTSP port between 1 and 65535"
+            return string(R.string.error_invalid_port)
         }
         if (state.rtspAuthEnabled && state.rtspUsername.isBlank()) {
-            return "Enter an RTSP username or disable authentication"
+            return string(R.string.error_auth_username)
         }
         if (state.rtspAuthEnabled && state.rtspPassword.isBlank()) {
-            return "Enter an RTSP password or disable authentication"
+            return string(R.string.error_auth_password)
         }
         return null
     }
 
-    private fun capabilitiesFor(lensFacing: Int): CameraCapabilities =
-        capabilitiesByLens.getOrPut(lensFacing) {
-            capabilityReader.readCapabilities(lensFacing)
+    private fun refreshCameraOptions() {
+        val cameras = capabilityReader.availableCameras()
+        if (cameras.isEmpty()) return
+        val state = _uiState.value
+        val selected = cameras.firstOrNull { it.id == state.selectedCameraId }
+            ?: cameras.first()
+        _uiState.update {
+            it.copy(
+                availableCameras = cameras,
+                selectedCameraId = selected.id
+            )
         }
+        applyCamera(selected.id, reopen = false)
+    }
+
+    private fun capabilitiesFor(cameraId: String): CameraCapabilities {
+        if (cameraId.isBlank()) return CameraCapabilities.empty()
+        return capabilitiesByCameraId.getOrPut(cameraId) {
+            capabilityReader.readCapabilities(cameraId)
+        }
+    }
 
     private fun buildInitialUiState(): RemCamUiState {
         val saved = readSavedSettings()
-        val lenses = capabilityReader.availableLenses()
-            .ifEmpty { listOf(saved.lens) }
-        val lens = saved.lens.takeIf { it in lenses } ?: lenses.first()
-        val capabilities = capabilitiesFor(lens)
+        val cameras = capabilityReader.availableCameras()
+        val selectedCamera = cameras.firstOrNull { it.id == saved.cameraId }
+            ?: cameras.firstOrNull()
+        val cameraId = selectedCamera?.id ?: saved.cameraId.orEmpty()
+        val capabilities = capabilitiesFor(cameraId)
         val resolutions = capabilities.resolutions.ifEmpty { listOf(saved.resolution) }
         val resolution = resolutions.firstOrNull { it == saved.resolution }
             ?: resolutions.firstOrNull { it.width == 1280 && it.height == 720 }
@@ -577,9 +606,9 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         val manualValues = defaultManualValues(capabilities, fps.fps)
 
         return RemCamUiState(
-            selectedCameraLens = lens,
+            selectedCameraId = cameraId,
+            availableCameras = cameras,
             sensorOrientation = capabilities.sensorOrientation,
-            availableLenses = lenses,
             selectedResolution = resolution,
             selectedFps = fps,
             selectedBitrate = saved.bitrate,
@@ -659,7 +688,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun readSavedSettings(): SavedSettings {
-        val lens = preferences.getInt(KEY_CAMERA_LENS, CameraCharacteristics.LENS_FACING_BACK)
+        val cameraId = preferences.getString(KEY_CAMERA_ID, null)
         val resolution = parseResolution(preferences.getString(KEY_RESOLUTION, null))
             ?: ResolutionPreset(1280, 720)
         val fps = FpsPreset.entries.firstOrNull {
@@ -670,11 +699,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         } ?: BitratePreset.MBPS_6
         val port = preferences.getString(KEY_PORT, "8554").orEmpty().ifBlank { "8554" }
         return SavedSettings(
-            lens = if (lens == CameraCharacteristics.LENS_FACING_FRONT) {
-                CameraCharacteristics.LENS_FACING_FRONT
-            } else {
-                CameraCharacteristics.LENS_FACING_BACK
-            },
+            cameraId = cameraId,
             resolution = resolution,
             fps = fps,
             bitrate = bitrate,
@@ -702,7 +727,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun saveSettings(state: RemCamUiState) {
         preferences.edit()
-            .putInt(KEY_CAMERA_LENS, state.selectedCameraLens)
+            .putString(KEY_CAMERA_ID, state.selectedCameraId)
             .putString(
                 KEY_RESOLUTION,
                 "${state.selectedResolution.width}x${state.selectedResolution.height}"
@@ -730,6 +755,25 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
             addresses = addresses,
             primaryAddress = addresses.firstOrNull()?.address
         )
+    }
+
+    private fun string(@StringRes id: Int, vararg args: Any): String =
+        getApplication<Application>().getString(id, *args)
+
+    private fun interfaceLabel(name: String): String = when {
+        name.startsWith("wlan") -> string(R.string.network_wifi)
+        name.startsWith("rndis") || name.startsWith("usb") ->
+            string(R.string.network_usb_tethering)
+
+        name.startsWith("eth") -> string(R.string.network_ethernet)
+        name.startsWith("ap") || name.startsWith("swlan") ->
+            string(R.string.network_hotspot)
+
+        name.startsWith("rmnet") || name.startsWith("ccmni") || name.startsWith("pdp") ->
+            string(R.string.network_mobile_data)
+
+        name.startsWith("tun") || name.startsWith("ppp") -> string(R.string.network_vpn)
+        else -> string(R.string.network_other)
     }
 
     private fun findLocalAddresses(): List<LocalAddress> {
@@ -773,7 +817,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private data class SavedSettings(
-        val lens: Int,
+        val cameraId: String?,
         val resolution: ResolutionPreset,
         val fps: FpsPreset,
         val bitrate: BitratePreset,
@@ -806,16 +850,6 @@ private fun RemCamUiState.withUrl(): RemCamUiState {
     return copy(streamUrl = url)
 }
 
-private fun interfaceLabel(name: String): String = when {
-    name.startsWith("wlan") -> "Wi-Fi"
-    name.startsWith("rndis") || name.startsWith("usb") -> "USB tethering"
-    name.startsWith("eth") -> "Ethernet"
-    name.startsWith("ap") || name.startsWith("swlan") -> "Hotspot"
-    name.startsWith("rmnet") || name.startsWith("ccmni") || name.startsWith("pdp") -> "Mobile data"
-    name.startsWith("tun") || name.startsWith("ppp") -> "VPN"
-    else -> "Network"
-}
-
 private fun interfacePriority(name: String): Int = when {
     name.startsWith("rndis") || name.startsWith("usb") -> 0
     name.startsWith("wlan") -> 1
@@ -825,7 +859,7 @@ private fun interfacePriority(name: String): Int = when {
 }
 
 private const val PREFS_NAME = "remcam_settings"
-private const val KEY_CAMERA_LENS = "camera_lens"
+private const val KEY_CAMERA_ID = "camera_id"
 private const val KEY_RESOLUTION = "resolution"
 private const val KEY_FPS = "fps"
 private const val KEY_BITRATE = "bitrate"

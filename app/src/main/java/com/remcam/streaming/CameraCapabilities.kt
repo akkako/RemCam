@@ -9,10 +9,13 @@ import android.hardware.camera2.params.StreamConfigurationMap
 import android.media.MediaCodec
 import android.media.MediaCodecList
 import android.util.Size
+import com.remcam.CameraOption
+import com.remcam.R
 import com.remcam.FpsPreset
 import com.remcam.ManualCapabilities
 import com.remcam.ResolutionPreset
 import com.remcam.manualWhiteBalancePresets
+import java.util.Locale
 
 data class CameraCapabilities(
     val sensorOrientation: Int = 90,
@@ -32,30 +35,75 @@ data class CameraCapabilities(
 }
 
 class CameraCapabilityReader(context: Context) {
+    private val appContext = context.applicationContext
     private val cameraManager =
-        context.applicationContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        appContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
     /**
-     * Lens facings that actually exist on this device, back first.
-     * Multi-camera devices may expose several ids with the same facing, so ids
-     * are collapsed to facing values and the first/largest one is used.
+     * Real camera ids exposed by Camera2, back first and in camera-service
+     * order. Multiple rear lenses (main / ultrawide / telephoto) stay separate
+     * instead of being collapsed to LENS_FACING_BACK.
      */
-    fun availableLenses(): List<Int> {
+    fun availableCameras(): List<CameraOption> {
         return runCatching {
-            cameraManager.cameraIdList
-                .mapNotNull { id ->
+            val ids = cameraManager.cameraIdList?.toList().orEmpty()
+            val raw = ids.mapNotNull { id ->
+                val characteristics = runCatching {
                     cameraManager.getCameraCharacteristics(id)
-                        .get(CameraCharacteristics.LENS_FACING)
+                }.getOrNull() ?: return@mapNotNull null
+                val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                    ?: return@mapNotNull null
+                val focal = characteristics
+                    .get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                    ?.firstOrNull()
+                val maxSize = characteristics
+                    .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    ?.getOutputSizes(SurfaceTexture::class.java)
+                    ?.maxByOrNull { it.width.toLong() * it.height.toLong() }
+                val detail = buildList {
+                    focal?.let { add(String.format(Locale.US, "%.1f mm", it)) }
+                    maxSize?.let { add("${it.width}×${it.height}") }
+                }.joinToString(" · ")
+                Triple(id, facing, detail)
+            }.sortedWith(
+                compareBy<Triple<String, Int, String>>(
+                    { lensPriority(it.second) },
+                    { ids.indexOf(it.first) }
+                )
+            )
+            val backCount = raw.count { it.second == CameraCharacteristics.LENS_FACING_BACK }
+            val frontCount = raw.count { it.second == CameraCharacteristics.LENS_FACING_FRONT }
+            var backIndex = 0
+            var frontIndex = 0
+            raw.map { (id, facing, detail) ->
+                val label = when (facing) {
+                    CameraCharacteristics.LENS_FACING_BACK -> {
+                        backIndex++
+                        if (backCount > 1) {
+                            appContext.getString(R.string.camera_back_numbered, backIndex)
+                        } else {
+                            appContext.getString(R.string.camera_back)
+                        }
+                    }
+
+                    CameraCharacteristics.LENS_FACING_FRONT -> {
+                        frontIndex++
+                        if (frontCount > 1) {
+                            appContext.getString(R.string.camera_front_numbered, frontIndex)
+                        } else {
+                            appContext.getString(R.string.camera_front)
+                        }
+                    }
+
+                    else -> appContext.getString(R.string.camera_external)
                 }
-                .distinct()
-                .sortedBy { lensPriority(it) }
+                CameraOption(id = id, lensFacing = facing, label = label, detail = detail)
+            }
         }.getOrElse { emptyList() }
     }
 
-    fun readCapabilities(lensFacing: Int): CameraCapabilities {
+    fun readCapabilities(cameraId: String): CameraCapabilities {
         return runCatching {
-            val cameraId = findCameraId(lensFacing)
-                ?: return@runCatching CameraCapabilities.empty()
             val characteristics = cameraManager.getCameraCharacteristics(cameraId)
             val configurationMap = characteristics
                 .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
@@ -142,12 +190,6 @@ class CameraCapabilityReader(context: Context) {
                 ?.div(1_000_000)
         }.getOrNull()
     }
-
-    private fun findCameraId(lensFacing: Int): String? =
-        cameraManager.cameraIdList.firstOrNull { id ->
-            cameraManager.getCameraCharacteristics(id)
-                .get(CameraCharacteristics.LENS_FACING) == lensFacing
-        }
 
     private fun maxOutputFps(configurationMap: StreamConfigurationMap, size: Size): Double {
         val durationNs = runCatching {

@@ -73,10 +73,10 @@ class RemCamStreamService : Service() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Streaming",
+            getString(R.string.notification_channel_name),
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Keeps the RemCam RTSP stream running in the background"
+            description = getString(R.string.notification_channel_description)
             setShowBadge(false)
             enableVibration(false)
             setSound(null, null)
@@ -99,10 +99,10 @@ class RemCamStreamService : Service() {
             Intent(this, RemCamStreamService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val text = url.ifBlank { "Camera is streaming over RTSP" }
+        val text = url.ifBlank { getString(R.string.notification_text) }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_remcam)
-            .setContentTitle("RemCam streaming")
+            .setContentTitle(getString(R.string.notification_title))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setOngoing(true)
@@ -111,7 +111,7 @@ class RemCamStreamService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(contentIntent)
-            .addAction(0, "Stop", stopIntent)
+            .addAction(0, getString(R.string.notification_stop), stopIntent)
             .build()
     }
 

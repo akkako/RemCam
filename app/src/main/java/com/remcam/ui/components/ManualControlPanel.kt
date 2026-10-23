@@ -30,7 +30,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.remcam.R
 import com.remcam.ManualCapabilities
 import com.remcam.ManualControlValues
 import com.remcam.ManualParameter
@@ -88,13 +90,13 @@ fun ManualControlPanel(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Manual controls",
+                text = stringResource(R.string.manual_controls),
                 color = RemCamText,
                 style = MaterialTheme.typography.titleSmall
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = "Reset",
+                text = stringResource(R.string.reset),
                 color = RemCamAccent,
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier
@@ -109,7 +111,7 @@ fun ManualControlPanel(
             ) {
                 Icon(
                     Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Hide manual controls",
+                    contentDescription = stringResource(R.string.hide_manual_controls),
                     tint = RemCamTextDim,
                     modifier = Modifier.size(20.dp)
                 )
@@ -124,7 +126,7 @@ fun ManualControlPanel(
         ) {
             parameters.forEach { parameter ->
                 SelectableChip(
-                    label = parameter.label,
+                    label = stringResource(parameter.labelRes),
                     selected = parameter == active,
                     onClick = { selected = parameter }
                 )
@@ -150,7 +152,10 @@ private fun IsoControl(
     val min = capabilities.sensitivityRange.first.toDouble()
     val max = capabilities.sensitivityRange.last.toDouble()
     Column {
-        ControlHeader(title = "ISO", value = values.iso.toString())
+        ControlHeader(
+            title = stringResource(R.string.param_iso),
+            value = values.iso.toString()
+        )
         Slider(
             value = logPosition(values.iso.toDouble(), min, max),
             onValueChange = { position ->
@@ -180,7 +185,7 @@ private fun ExposureControl(
     ).toDouble().coerceAtLeast(min)
     Column {
         ControlHeader(
-            title = "Exposure",
+            title = stringResource(R.string.param_exposure),
             value = formatExposureTime(values.exposureTimeNs)
         )
         Slider(
@@ -211,8 +216,11 @@ private fun FocusControl(
     if (maxFocus <= 0f) return
     Column {
         ControlHeader(
-            title = "Focus",
-            value = formatFocusDistance(values.focusDistanceDiopters)
+            title = stringResource(R.string.param_focus),
+            value = formatFocusDistance(
+                values.focusDistanceDiopters,
+                stringResource(R.string.infinity)
+            )
         )
         Slider(
             value = (values.focusDistanceDiopters / maxFocus).coerceIn(0f, 1f),
@@ -238,8 +246,9 @@ private fun WhiteBalanceControl(
     val selectedPreset = presets.firstOrNull { it.awbMode == values.awbMode }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         ControlHeader(
-            title = "White balance",
-            value = selectedPreset?.label ?: "Auto"
+            title = stringResource(R.string.param_white_balance),
+            value = selectedPreset?.let { stringResource(it.labelRes) }
+                ?: stringResource(R.string.white_balance_auto)
         )
         Row(
             modifier = Modifier
@@ -249,7 +258,7 @@ private fun WhiteBalanceControl(
         ) {
             presets.forEach { preset ->
                 SelectableChip(
-                    label = preset.label,
+                    label = stringResource(preset.labelRes),
                     selected = preset.awbMode == values.awbMode,
                     onClick = { onValuesChanged(values.copy(awbMode = preset.awbMode)) }
                 )
@@ -287,12 +296,12 @@ private fun remCamSliderColors(): SliderColors = SliderDefaults.colors(
     inactiveTickColor = RemCamTextDim
 )
 
-private val ManualParameter.label: String
+private val ManualParameter.labelRes: Int
     get() = when (this) {
-        ManualParameter.ISO -> "ISO"
-        ManualParameter.EXPOSURE -> "Exposure"
-        ManualParameter.FOCUS -> "Focus"
-        ManualParameter.WHITE_BALANCE -> "WB"
+        ManualParameter.ISO -> R.string.param_iso
+        ManualParameter.EXPOSURE -> R.string.param_exposure
+        ManualParameter.FOCUS -> R.string.param_focus
+        ManualParameter.WHITE_BALANCE -> R.string.param_wb
     }
 
 private fun resetValue(
@@ -339,8 +348,8 @@ private fun formatExposureTime(nanoseconds: Long): String = when {
         String.format(Locale.US, "%.0f us", nanoseconds / 1_000.0)
 }
 
-private fun formatFocusDistance(diopters: Float): String {
-    if (diopters <= 0.01f) return "Infinity"
+private fun formatFocusDistance(diopters: Float, infinityLabel: String): String {
+    if (diopters <= 0.01f) return infinityLabel
     val centimeters = 100f / diopters
     return if (centimeters >= 100f) {
         String.format(Locale.US, "%.1f m", centimeters / 100f)

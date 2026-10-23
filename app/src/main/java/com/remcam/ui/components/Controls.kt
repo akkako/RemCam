@@ -1,7 +1,6 @@
 package com.remcam.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,9 +28,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.remcam.R
 import com.remcam.ui.theme.RemCamAccent
 import com.remcam.ui.theme.RemCamOnAccent
 import com.remcam.ui.theme.RemCamRed
@@ -70,7 +71,6 @@ fun CameraShutterButton(
             .size(78.dp)
             .alpha(if (enabled || busy) 1f else 0.45f)
             .clip(CircleShape)
-            .border(2.5.dp, Color.White.copy(alpha = 0.92f), CircleShape)
             .clickable(enabled = enabled && !busy, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -90,7 +90,11 @@ fun CameraShutterButton(
             } else {
                 Icon(
                     imageVector = if (streaming) Icons.Default.Stop else Icons.Default.PlayArrow,
-                    contentDescription = if (streaming) "Stop streaming" else "Start streaming",
+                    contentDescription = if (streaming) {
+                        stringResource(R.string.stop_streaming)
+                    } else {
+                        stringResource(R.string.start_streaming)
+                    },
                     tint = if (streaming) Color.White else RemCamOnAccent,
                     modifier = Modifier.size(28.dp)
                 )
@@ -120,7 +124,7 @@ fun ZoomControl(
     ) {
         ZoomStepButton(
             imageVector = Icons.Default.Remove,
-            contentDescription = "Zoom out",
+            contentDescription = stringResource(R.string.zoom_out),
             enabled = canZoom && zoom > 1.01f,
             onClick = onZoomOut
         )
@@ -136,7 +140,7 @@ fun ZoomControl(
         )
         ZoomStepButton(
             imageVector = Icons.Default.Add,
-            contentDescription = "Zoom in",
+            contentDescription = stringResource(R.string.zoom_in),
             enabled = canZoom && zoom < maxZoom - 0.01f,
             onClick = onZoomIn
         )

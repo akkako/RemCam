@@ -35,15 +35,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Lens
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -69,6 +73,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -116,11 +121,12 @@ fun RemCamScreen(viewModel: RemCamViewModel) {
         val focusScale = remember { Animatable(0.72f) }
         val focusRingSize = 72.dp
         val focusRingSizePx = with(density) { focusRingSize.toPx() }
+        val copiedMessage = stringResource(R.string.copied_to_clipboard)
 
         fun copyUrl(text: String) {
             if (text.isBlank()) return
             clipboardManager.setText(AnnotatedString(text))
-            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, copiedMessage, Toast.LENGTH_SHORT).show()
         }
 
         val localNetworkPermissionLauncher = rememberLauncherForActivityResult(
@@ -404,6 +410,7 @@ fun RemCamScreen(viewModel: RemCamViewModel) {
                     TopControlBar(
                         state = state,
                         onToggleTorch = viewModel::toggleTorch,
+                        onSelectCamera = viewModel::selectCamera,
                         onOpenSettings = { showSettings = true }
                     )
                     if (state.errorMessage != null) {
@@ -457,16 +464,18 @@ fun RemCamScreen(viewModel: RemCamViewModel) {
 private fun TopControlBar(
     state: RemCamUiState,
     onToggleTorch: () -> Unit,
+    onSelectCamera: (String) -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val statusText = when {
-        state.isStreaming -> "Live"
-        state.isStarting -> "Starting"
-        state.isStopping -> "Stopping"
-        state.errorMessage != null -> "Error"
-        state.cameraReady -> "Ready"
-        else -> "Camera off"
+        state.isStreaming -> stringResource(R.string.status_live)
+        state.isStarting -> stringResource(R.string.status_starting)
+        state.isStopping -> stringResource(R.string.status_stopping)
+        state.errorMessage != null -> stringResource(R.string.status_error)
+        state.cameraReady -> stringResource(R.string.status_ready)
+        else -> stringResource(R.string.status_camera_off)
     }
+    val lensLabel = state.lensLabel.ifBlank { stringResource(R.string.camera_fallback) }
     val statusColor = when {
         state.isStreaming -> RemCamGreen
         state.isStarting || state.isStopping -> RemCamAmber
@@ -481,29 +490,41 @@ private fun TopControlBar(
             .height(60.dp)
             .padding(horizontal = 8.dp)
     ) {
-        if (state.flashAvailable) {
-            IconButton(
-                onClick = onToggleTorch,
-                enabled = state.cameraReady || state.isStreaming,
-                modifier = Modifier.align(Alignment.CenterStart)
-            ) {
-                Icon(
-                    imageVector = if (state.torchEnabled) {
-                        Icons.Default.FlashOn
-                    } else {
-                        Icons.Default.FlashOff
-                    },
-                    contentDescription = if (state.torchEnabled) {
-                        "Turn flashlight off"
-                    } else {
-                        "Turn flashlight on"
-                    },
-                    tint = when {
-                        !(state.cameraReady || state.isStreaming) -> Color.White.copy(alpha = 0.35f)
-                        state.torchEnabled -> RemCamAccent
-                        else -> Color.White
-                    },
-                    modifier = Modifier.size(24.dp)
+        Row(
+            modifier = Modifier.align(Alignment.CenterStart),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (state.flashAvailable) {
+                IconButton(
+                    onClick = onToggleTorch,
+                    enabled = state.cameraReady || state.isStreaming
+                ) {
+                    Icon(
+                        imageVector = if (state.torchEnabled) {
+                            Icons.Default.FlashOn
+                        } else {
+                            Icons.Default.FlashOff
+                        },
+                        contentDescription = if (state.torchEnabled) {
+                            stringResource(R.string.torch_off)
+                        } else {
+                            stringResource(R.string.torch_on)
+                        },
+                        tint = when {
+                            !(state.cameraReady || state.isStreaming) ->
+                                Color.White.copy(alpha = 0.35f)
+
+                            state.torchEnabled -> RemCamAccent
+                            else -> Color.White
+                        },
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+            if (state.availableCameras.size > 1) {
+                CameraLensMenu(
+                    state = state,
+                    onSelectCamera = onSelectCamera
                 )
             }
         }
@@ -526,7 +547,11 @@ private fun TopControlBar(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "${state.lensLabel} · ${state.selectedResolution.height}p",
+                text = stringResource(
+                    R.string.status_lens_resolution,
+                    lensLabel,
+                    state.selectedResolution.height
+                ),
                 style = MaterialTheme.typography.labelSmall,
                 color = RemCamTextDim,
                 maxLines = 1
@@ -539,10 +564,87 @@ private fun TopControlBar(
         ) {
             Icon(
                 Icons.Default.Settings,
-                contentDescription = "Settings",
+                contentDescription = stringResource(R.string.settings),
                 tint = Color.White,
                 modifier = Modifier.size(24.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun CameraLensMenu(
+    state: RemCamUiState,
+    onSelectCamera: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val enabled = !state.isStreaming && !state.isBusy
+    Box {
+        IconButton(
+            onClick = { expanded = true },
+            enabled = enabled
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Lens,
+                    contentDescription = stringResource(R.string.select_camera),
+                    tint = if (enabled) Color.White else Color.White.copy(alpha = 0.35f),
+                    modifier = Modifier.size(22.dp)
+                )
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = if (enabled) {
+                        Color.White.copy(alpha = 0.7f)
+                    } else {
+                        Color.White.copy(alpha = 0.25f)
+                    },
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            state.availableCameras.forEach { camera ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(
+                                text = camera.label,
+                                color = if (camera.id == state.selectedCameraId) {
+                                    RemCamAccent
+                                } else {
+                                    RemCamText
+                                },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (camera.detail.isNotBlank()) {
+                                Text(
+                                    text = camera.detail,
+                                    color = RemCamTextDim,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                    },
+                    trailingIcon = {
+                        if (camera.id == state.selectedCameraId) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = RemCamAccent,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelectCamera(camera.id)
+                    }
+                )
+            }
         }
     }
 }
@@ -582,18 +684,7 @@ private fun BottomControlArea(
                     .padding(start = 24.dp, end = 24.dp, top = 6.dp, bottom = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (state.availableLenses.size > 1) {
-                        CameraSwitchButton(
-                            enabled = !state.isStreaming && !state.isBusy &&
-                                state.hasCameraPermission,
-                            onClick = viewModel::switchCamera
-                        )
-                    }
-                }
+                Spacer(Modifier.weight(1f))
 
                 CameraShutterButton(
                     streaming = streaming,
@@ -645,14 +736,14 @@ private fun ModeTabs(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ModeTab(
-                label = "Auto",
+                label = stringResource(R.string.auto),
                 selected = !manualMode,
                 enabled = autoEnabled,
                 onClick = { onModeChange(false) }
             )
             Spacer(Modifier.width(4.dp))
             ModeTab(
-                label = "Manual",
+                label = stringResource(R.string.manual),
                 selected = manualMode,
                 enabled = manualEnabled,
                 onClick = { onModeChange(true) }
@@ -696,33 +787,6 @@ private fun ModeTab(
 }
 
 @Composable
-private fun CameraSwitchButton(
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .size(48.dp)
-            .clip(CircleShape)
-            .background(Color(0x99000000))
-            .border(
-                width = 1.dp,
-                color = Color.White.copy(alpha = if (enabled) 0.35f else 0.15f),
-                shape = CircleShape
-            )
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            Icons.Default.Cameraswitch,
-            contentDescription = "Switch camera",
-            tint = Color.White.copy(alpha = if (enabled) 0.95f else 0.3f),
-            modifier = Modifier.size(23.dp)
-        )
-    }
-}
-
-@Composable
 private fun LiveUrlBanner(
     url: String,
     onCopy: () -> Unit
@@ -752,7 +816,7 @@ private fun LiveUrlBanner(
         ) {
             Icon(
                 Icons.Default.ContentCopy,
-                contentDescription = "Copy stream URL",
+                contentDescription = stringResource(R.string.copy_stream_url),
                 tint = RemCamTextDim,
                 modifier = Modifier.size(16.dp)
             )
@@ -786,7 +850,7 @@ private fun ErrorBanner(
         ) {
             Icon(
                 Icons.Default.Close,
-                contentDescription = "Dismiss error",
+                contentDescription = stringResource(R.string.dismiss_error),
                 tint = RemCamTextDim,
                 modifier = Modifier.size(16.dp)
             )
@@ -814,14 +878,13 @@ private fun PermissionOverlay(onRequest: () -> Unit) {
             )
             Spacer(Modifier.height(18.dp))
             Text(
-                text = "Camera access required",
+                text = stringResource(R.string.permission_title),
                 style = MaterialTheme.typography.titleMedium,
                 color = RemCamText
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "RemCam needs the camera to show a preview and stream over RTSP " +
-                    "on your local network. Video never leaves your network unless a client connects.",
+                text = stringResource(R.string.permission_body),
                 style = MaterialTheme.typography.bodySmall,
                 color = RemCamTextDim,
                 textAlign = TextAlign.Center
@@ -831,7 +894,7 @@ private fun PermissionOverlay(onRequest: () -> Unit) {
                 onClick = onRequest,
                 shape = RoundedCornerShape(50)
             ) {
-                Text("Allow camera access")
+                Text(stringResource(R.string.permission_button))
             }
         }
     }
@@ -857,13 +920,13 @@ private fun CameraStateOverlay(
                 CircularProgressIndicator(color = RemCamAccent)
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "Opening camera",
+                    text = stringResource(R.string.opening_camera),
                     style = MaterialTheme.typography.bodySmall,
                     color = RemCamTextDim
                 )
             } else {
                 Text(
-                    text = "Camera unavailable",
+                    text = stringResource(R.string.camera_unavailable),
                     style = MaterialTheme.typography.titleSmall,
                     color = RemCamText
                 )
@@ -879,7 +942,7 @@ private fun CameraStateOverlay(
                     onClick = onRetry,
                     shape = RoundedCornerShape(50)
                 ) {
-                    Text("Retry")
+                    Text(stringResource(R.string.retry))
                 }
             }
         }

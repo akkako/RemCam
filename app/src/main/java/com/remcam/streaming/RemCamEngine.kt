@@ -2,9 +2,11 @@ package com.remcam.streaming
 
 import android.content.Context
 import android.graphics.PointF
+import androidx.annotation.StringRes
 import android.view.TextureView
 import android.util.Log
 import com.remcam.BitratePreset
+import com.remcam.R
 import com.remcam.FpsPreset
 import com.remcam.ManualControlValues
 import com.remcam.RemCamStreamService
@@ -21,7 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class StreamRequest(
-    val lensFacing: Int,
+    val cameraId: String,
     val resolution: ResolutionPreset,
     val fps: FpsPreset,
     val bitrate: BitratePreset,
@@ -100,6 +102,9 @@ class RemCamEngine private constructor(private val appContext: Context) {
         }
     }
 
+    private fun str(@StringRes id: Int, vararg args: Any): String =
+        appContext.getString(id, *args)
+
     companion object {
         @Volatile
         private var instance: RemCamEngine? = null
@@ -154,13 +159,13 @@ class RemCamEngine private constructor(private val appContext: Context) {
     // ------------------------------------------------------------------
 
     suspend fun openPreview(
-        lensFacing: Int,
+        cameraId: String,
         fps: Int,
         resolution: ResolutionPreset
     ): Result<Unit> {
         if (isStreamBusy()) return Result.success(Unit)
         return try {
-            cameraManager.openPreview(lensFacing, fps, resolution)
+            cameraManager.openPreview(cameraId, fps, resolution)
             _state.update {
                 it.copy(
                     cameraReady = true,
@@ -176,7 +181,7 @@ class RemCamEngine private constructor(private val appContext: Context) {
             _state.update {
                 it.copy(
                     cameraReady = false,
-                    errorMessage = error.message ?: "Unable to open camera",
+                    errorMessage = error.message ?: str(R.string.error_unable_open_camera),
                     errorId = it.errorId + 1
                 )
             }
@@ -211,7 +216,7 @@ class RemCamEngine private constructor(private val appContext: Context) {
         scope.launch {
             val result = runCatching {
                 cameraManager.startStreaming(
-                    lensFacing = request.lensFacing,
+                    cameraId = request.cameraId,
                     resolution = request.resolution,
                     fps = request.fps,
                     bitrate = request.bitrate,
@@ -248,7 +253,7 @@ class RemCamEngine private constructor(private val appContext: Context) {
                         streamStatus = StreamStatus.ERROR,
                         streamUrl = null,
                         cameraReady = cameraManager.isCameraOpen(),
-                        errorMessage = error.message ?: "Failed to start RTSP stream",
+                        errorMessage = error.message ?: str(R.string.error_failed_start_stream),
                         errorId = it.errorId + 1,
                         previewWidth = cameraManager.getPreviewWidth(),
                         previewHeight = cameraManager.getPreviewHeight()

@@ -1,7 +1,7 @@
 package com.remcam
 
-import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
+import androidx.annotation.StringRes
 
 enum class StreamStatus {
     NOT_STREAMING,
@@ -89,18 +89,18 @@ data class ManualCapabilities(
  * No continuous Kelvin or color-gain implementation by design.
  */
 data class WhiteBalancePreset(
-    val label: String,
+    @StringRes val labelRes: Int,
     val awbMode: Int
 )
 
 val manualWhiteBalancePresets: List<WhiteBalancePreset> = listOf(
-    WhiteBalancePreset("Incandescent", CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT),
-    WhiteBalancePreset("Warm fluorescent", CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT),
-    WhiteBalancePreset("Fluorescent", CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT),
-    WhiteBalancePreset("Daylight", CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT),
-    WhiteBalancePreset("Cloudy", CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT),
-    WhiteBalancePreset("Twilight", CaptureRequest.CONTROL_AWB_MODE_TWILIGHT),
-    WhiteBalancePreset("Shade", CaptureRequest.CONTROL_AWB_MODE_SHADE)
+    WhiteBalancePreset(R.string.wb_incandescent, CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT),
+    WhiteBalancePreset(R.string.wb_warm_fluorescent, CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT),
+    WhiteBalancePreset(R.string.wb_fluorescent, CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT),
+    WhiteBalancePreset(R.string.wb_daylight, CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT),
+    WhiteBalancePreset(R.string.wb_cloudy, CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT),
+    WhiteBalancePreset(R.string.wb_twilight, CaptureRequest.CONTROL_AWB_MODE_TWILIGHT),
+    WhiteBalancePreset(R.string.wb_shade, CaptureRequest.CONTROL_AWB_MODE_SHADE)
 )
 
 data class ManualControlValues(
@@ -110,13 +110,20 @@ data class ManualControlValues(
     val awbMode: Int? = null
 )
 
+data class CameraOption(
+    val id: String,
+    val lensFacing: Int,
+    val label: String,
+    val detail: String = ""
+)
+
 data class RemCamUiState(
     val hasCameraPermission: Boolean = false,
     val cameraReady: Boolean = false,
     val streamStatus: StreamStatus = StreamStatus.NOT_STREAMING,
     val errorMessage: String? = null,
-    val selectedCameraLens: Int = CameraCharacteristics.LENS_FACING_BACK,
-    val availableLenses: List<Int> = emptyList(),
+    val selectedCameraId: String = "",
+    val availableCameras: List<CameraOption> = emptyList(),
     val sensorOrientation: Int = 90,
     val selectedResolution: ResolutionPreset = ResolutionPreset(1280, 720),
     val selectedFps: FpsPreset = FpsPreset.FPS_30,
@@ -151,11 +158,11 @@ data class RemCamUiState(
     val supportsManual: Boolean get() = manualCapabilities != null
     val supportsFocus: Boolean get() = manualCapabilities?.supportsFocus == true
     val supportsWhiteBalance: Boolean get() = manualCapabilities?.supportsWhiteBalance == true
-    val lensLabel: String get() = when (selectedCameraLens) {
-        CameraCharacteristics.LENS_FACING_BACK -> "Back"
-        CameraCharacteristics.LENS_FACING_FRONT -> "Front"
-        else -> "External"
-    }
+    val lensLabel: String get() =
+        availableCameras.firstOrNull { it.id == selectedCameraId }?.label.orEmpty()
+
+    val selectedCameraDetail: String get() =
+        availableCameras.firstOrNull { it.id == selectedCameraId }?.detail.orEmpty()
 }
 
 private fun aspectRatioLabel(width: Int, height: Int): String {

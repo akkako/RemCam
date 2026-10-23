@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.remcam.BitratePreset
+import com.remcam.R
 import com.remcam.BuildConfig
 import com.remcam.FpsPreset
 import com.remcam.LocalAddress
@@ -80,6 +82,8 @@ fun RemCamSettingsSheet(
     val clipboardManager = LocalClipboardManager.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val editable = !state.isStreaming && !state.isBusy
+    val cameraLabel = state.lensLabel.ifBlank { stringResource(R.string.camera_fallback) }
+    val copiedMessage = stringResource(R.string.copied_to_clipboard)
     val port = state.portInput.toIntOrNull()
     val authenticatedUrl = authenticatedRtspUrl(
         baseUrl = state.streamUrl,
@@ -90,7 +94,7 @@ fun RemCamSettingsSheet(
     fun copyToClipboard(text: String) {
         if (text.isBlank()) return
         clipboardManager.setText(AnnotatedString(text))
-        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, copiedMessage, Toast.LENGTH_SHORT).show()
     }
 
     ModalBottomSheet(
@@ -114,23 +118,23 @@ fun RemCamSettingsSheet(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Settings",
+                        text = stringResource(R.string.settings_title),
                         style = MaterialTheme.typography.titleMedium,
                         color = RemCamText
                     )
                     Text(
-                        text = "RemCam · ${state.lensLabel} camera",
+                        text = stringResource(R.string.settings_subtitle, cameraLabel),
                         style = MaterialTheme.typography.labelMedium,
                         color = RemCamTextDim
                     )
                 }
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close settings")
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.close_settings))
                 }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionTitle("RTSP STREAM")
+                SectionTitle(stringResource(R.string.section_rtsp_stream))
                 SettingsCard {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -139,16 +143,16 @@ fun RemCamSettingsSheet(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = if (state.rtspAuthEnabled) {
-                                    "Authenticated stream URL"
+                                    stringResource(R.string.stream_url_authenticated)
                                 } else {
-                                    "Stream URL (no authentication)"
+                                    stringResource(R.string.stream_url_no_auth)
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = RemCamTextDim
                             )
                             Spacer(Modifier.height(3.dp))
                             Text(
-                                text = state.streamUrl.ifBlank { "No local address" },
+                                text = state.streamUrl.ifBlank { stringResource(R.string.no_local_address) },
                                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                                 color = if (state.streamUrl.isBlank()) RemCamTextDim else RemCamText,
                                 maxLines = 1,
@@ -159,7 +163,7 @@ fun RemCamSettingsSheet(
                             onClick = { copyToClipboard(state.streamUrl) },
                             enabled = state.streamUrl.isNotBlank()
                         ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy stream URL")
+                            Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.copy_stream_url))
                         }
                     }
 
@@ -177,14 +181,14 @@ fun RemCamSettingsSheet(
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(Modifier.size(6.dp))
-                            Text("Refresh network")
+                            Text(stringResource(R.string.refresh_network))
                         }
                         Spacer(Modifier.weight(1f))
                         Text(
                             text = if (state.localAddresses.isEmpty()) {
-                                "No IPv4 addresses"
+                                stringResource(R.string.no_ipv4_addresses)
                             } else {
-                                "${state.localAddresses.size} address(es)"
+                                stringResource(R.string.address_count, state.localAddresses.size)
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = if (state.localAddresses.isEmpty()) {
@@ -197,7 +201,7 @@ fun RemCamSettingsSheet(
 
                     if (state.localAddresses.isEmpty()) {
                         Text(
-                            text = "Connect Wi-Fi or enable USB tethering, then tap refresh.",
+                            text = stringResource(R.string.no_network_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
@@ -218,7 +222,7 @@ fun RemCamSettingsSheet(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionTitle("AUTHENTICATION")
+                SectionTitle(stringResource(R.string.section_authentication))
                 SettingsCard {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -226,15 +230,15 @@ fun RemCamSettingsSheet(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Basic authentication",
+                                text = stringResource(R.string.basic_auth),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = RemCamText
                             )
                             Text(
                                 text = if (state.rtspAuthEnabled) {
-                                    "Username and password required"
+                                    stringResource(R.string.auth_required_desc)
                                 } else {
-                                    "No authentication; anyone on the network can connect"
+                                    stringResource(R.string.auth_disabled_desc)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = RemCamTextDim
@@ -250,7 +254,7 @@ fun RemCamSettingsSheet(
                         OutlinedTextField(
                             value = state.rtspUsername,
                             onValueChange = viewModel::updateRtspUsername,
-                            label = { Text("Username") },
+                            label = { Text(stringResource(R.string.username)) },
                             singleLine = true,
                             enabled = editable,
                             modifier = Modifier.fillMaxWidth()
@@ -258,7 +262,7 @@ fun RemCamSettingsSheet(
                         OutlinedTextField(
                             value = state.rtspPassword,
                             onValueChange = viewModel::updateRtspPassword,
-                            label = { Text("Password") },
+                            label = { Text(stringResource(R.string.password)) },
                             singleLine = true,
                             enabled = editable,
                             visualTransformation = PasswordVisualTransformation(),
@@ -278,26 +282,86 @@ fun RemCamSettingsSheet(
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(Modifier.size(6.dp))
-                            Text("Copy authenticated URL")
+                            Text(stringResource(R.string.copy_authenticated_url))
                         }
                     }
                 }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionTitle("STREAM SETTINGS")
+                SectionTitle(stringResource(R.string.section_camera))
+                SettingsCard {
+                    Text(
+                        text = stringResource(R.string.selected_camera),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = RemCamTextDim
+                    )
+                    Text(
+                        text = stringResource(R.string.camera_with_id, cameraLabel, state.selectedCameraId),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = RemCamText
+                    )
+                    if (state.selectedCameraDetail.isNotBlank()) {
+                        Text(
+                            text = state.selectedCameraDetail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = RemCamTextDim
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.switch_lenses_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = RemCamTextDim
+                    )
+                    HorizontalDivider(color = RemCamSurfaceHigh)
+                    Text(
+                        text = stringResource(R.string.supported_resolutions),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = RemCamTextDim
+                    )
+                    Text(
+                        text = if (state.availableResolutions.isEmpty()) {
+                            stringResource(R.string.not_available)
+                        } else {
+                            state.availableResolutions.joinToString("  ·  ") { it.label }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RemCamText
+                    )
+                    Text(
+                        text = stringResource(R.string.frame_rates_at, state.selectedResolution.label),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = RemCamTextDim
+                    )
+                    Text(
+                        text = state.availableFpsOptions.joinToString(" / ") { it.label },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RemCamText
+                    )
+                    state.encoderMaxBitrateMbps?.let { maxMbps ->
+                        Text(
+                            text = stringResource(R.string.encoder_max_bitrate, maxMbps),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = RemCamTextDim
+                        )
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionTitle(stringResource(R.string.section_stream_settings))
                 SettingsCard {
                     OutlinedTextField(
                         value = state.portInput,
                         onValueChange = viewModel::updatePortInput,
-                        label = { Text("RTSP port") },
+                        label = { Text(stringResource(R.string.rtsp_port)) },
                         singleLine = true,
                         enabled = editable,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth()
                     )
                     SettingDropdown(
-                        label = "Resolution",
+                        label = stringResource(R.string.resolution),
                         selected = state.selectedResolution,
                         options = state.availableResolutions,
                         optionLabel = { "${it.label} · ${it.aspectRatioLabel}" },
@@ -305,7 +369,7 @@ fun RemCamSettingsSheet(
                         onSelected = viewModel::selectResolution
                     )
                     SettingDropdown(
-                        label = "Frame rate",
+                        label = stringResource(R.string.frame_rate),
                         selected = state.selectedFps,
                         options = state.availableFpsOptions,
                         optionLabel = { it.label },
@@ -313,7 +377,7 @@ fun RemCamSettingsSheet(
                         onSelected = viewModel::selectFps
                     )
                     SettingDropdown(
-                        label = "Bitrate",
+                        label = stringResource(R.string.bitrate),
                         selected = state.selectedBitrate,
                         options = BitratePreset.entries,
                         optionLabel = { it.label },
@@ -323,14 +387,13 @@ fun RemCamSettingsSheet(
                     val encoderMax = state.encoderMaxBitrateMbps
                     if (encoderMax != null && state.selectedBitrate.bitrateMbps > encoderMax) {
                         Text(
-                            text = "This phone's H.264 encoder is rated up to $encoderMax Mbps. " +
-                                "Higher values may be capped or fail to start.",
+                            text = stringResource(R.string.encoder_bitrate_warning, encoderMax),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
                     }
                     Text(
-                        text = "Stream settings apply on the next start.",
+                        text = stringResource(R.string.stream_settings_apply),
                         style = MaterialTheme.typography.labelSmall,
                         color = RemCamTextDim
                     )
@@ -338,45 +401,47 @@ fun RemCamSettingsSheet(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionTitle("CAMERA CAPABILITIES")
+                SectionTitle(stringResource(R.string.section_camera_capabilities))
                 SettingsCard {
                     CapabilityRow(
-                        label = "Manual ISO / exposure",
-                        value = if (state.supportsManual) "Supported" else "Not available",
+                        label = stringResource(R.string.manual_iso_exposure),
+                        value = if (state.supportsManual) stringResource(R.string.supported) else stringResource(R.string.not_available),
                         supported = state.supportsManual
                     )
                     CapabilityRow(
-                        label = "Manual focus",
-                        value = if (state.supportsFocus) "Supported" else "Not available",
+                        label = stringResource(R.string.manual_focus),
+                        value = if (state.supportsFocus) stringResource(R.string.supported) else stringResource(R.string.not_available),
                         supported = state.supportsFocus
                     )
                     CapabilityRow(
-                        label = "White balance presets",
+                        label = stringResource(R.string.white_balance_presets),
                         value = if (state.supportsWhiteBalance) {
-                            "${state.manualCapabilities?.whiteBalancePresets?.size ?: 0} presets"
+                            stringResource(
+                                R.string.presets_count,
+                                state.manualCapabilities?.whiteBalancePresets?.size ?: 0
+                            )
                         } else {
-                            "Not available"
+                            stringResource(R.string.not_available)
                         },
                         supported = state.supportsWhiteBalance
                     )
                     CapabilityRow(
-                        label = "Flash / torch",
-                        value = if (state.flashAvailable) "Supported" else "Not available",
+                        label = stringResource(R.string.flash_torch),
+                        value = if (state.flashAvailable) stringResource(R.string.supported) else stringResource(R.string.not_available),
                         supported = state.flashAvailable
                     )
                     CapabilityRow(
-                        label = "Digital zoom",
+                        label = stringResource(R.string.digital_zoom),
                         value = if (state.maxZoom > 1.01f) {
-                            String.format(Locale.US, "%.1fx max", state.maxZoom)
+                            stringResource(R.string.zoom_max, state.maxZoom)
                         } else {
-                            "Not available"
+                            stringResource(R.string.not_available)
                         },
                         supported = state.maxZoom > 1.01f
                     )
                     if (!state.supportsManual) {
                         Text(
-                            text = "This camera does not expose AE OFF with ISO/exposure ranges, " +
-                                "so the Manual panel stays disabled and automatic capture is used.",
+                            text = stringResource(R.string.manual_unsupported_note),
                             style = MaterialTheme.typography.bodySmall,
                             color = RemCamTextDim
                         )
@@ -385,21 +450,20 @@ fun RemCamSettingsSheet(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionTitle("ABOUT")
+                SectionTitle(stringResource(R.string.section_about))
                 SettingsCard {
                     Text(
-                        text = "RemCam ${BuildConfig.VERSION_NAME}",
+                        text = stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
                         style = MaterialTheme.typography.titleSmall,
                         color = RemCamText
                     )
                     Text(
-                        text = "Camera2 · MediaCodec H.264 · local RTSP server",
+                        text = stringResource(R.string.about_stack),
                         style = MaterialTheme.typography.bodySmall,
                         color = RemCamTextDim
                     )
                     Text(
-                        text = "Stream path: /camera · Latin-1-safe RTP payload. " +
-                            "No cloud relay or external server.",
+                        text = stringResource(R.string.about_stream),
                         style = MaterialTheme.typography.bodySmall,
                         color = RemCamTextDim
                     )
@@ -447,7 +511,7 @@ private fun AddressRow(
         ) {
             Icon(
                 Icons.Default.ContentCopy,
-                contentDescription = "Copy ${address.label} URL"
+                contentDescription = stringResource(R.string.copy_address_url, address.label)
             )
         }
     }

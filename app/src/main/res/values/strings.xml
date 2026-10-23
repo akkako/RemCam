@@ -1,4 +1,176 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">RemCam</string>
+    <string name="app_name" translatable="false">RemCam</string>
+
+    <!-- Common -->
+    <string name="copied_to_clipboard">Copied to clipboard</string>
+    <string name="close_settings">Close settings</string>
+    <string name="copy_address_url">Copy %1$s URL</string>
+    <string name="copy_stream_url">Copy stream URL</string>
+    <string name="dismiss_error">Dismiss error</string>
+    <string name="retry">Retry</string>
+    <string name="settings">Settings</string>
+    <string name="auto">Auto</string>
+    <string name="manual">Manual</string>
+    <string name="reset">Reset</string>
+    <string name="supported">Supported</string>
+    <string name="not_available">Not available</string>
+
+    <!-- Camera labels and status -->
+    <string name="camera_back">Back</string>
+    <string name="camera_back_numbered">Back %1$d</string>
+    <string name="camera_front">Front</string>
+    <string name="camera_front_numbered">Front %1$d</string>
+    <string name="camera_external">External</string>
+    <string name="camera_fallback">Camera</string>
+    <string name="select_camera">Select camera</string>
+    <string name="status_live">Live</string>
+    <string name="status_starting">Starting</string>
+    <string name="status_stopping">Stopping</string>
+    <string name="status_error">Error</string>
+    <string name="status_ready">Ready</string>
+    <string name="status_camera_off">Camera off</string>
+    <string name="status_lens_resolution">%1$s · %2$dp</string>
+    <string name="torch_on">Turn flashlight on</string>
+    <string name="torch_off">Turn flashlight off</string>
+    <string name="start_streaming">Start streaming</string>
+    <string name="stop_streaming">Stop streaming</string>
+    <string name="zoom_in">Zoom in</string>
+    <string name="zoom_out">Zoom out</string>
+
+    <!-- Permission / camera state -->
+    <string name="permission_title">Camera access required</string>
+    <string name="permission_body">RemCam needs the camera to show a preview and stream over RTSP on your local network. Video never leaves your network unless a client connects.</string>
+    <string name="permission_button">Allow camera access</string>
+    <string name="opening_camera">Opening camera</string>
+    <string name="camera_unavailable">Camera unavailable</string>
+
+    <!-- Settings header -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_subtitle">RemCam · %1$s camera</string>
+
+    <!-- Settings: RTSP -->
+    <string name="section_rtsp_stream">RTSP STREAM</string>
+    <string name="stream_url_no_auth">Stream URL (no authentication)</string>
+    <string name="stream_url_authenticated">Authenticated stream URL</string>
+    <string name="no_local_address">No local address</string>
+    <string name="refresh_network">Refresh network</string>
+    <string name="no_ipv4_addresses">No IPv4 addresses</string>
+    <string name="address_count">%1$d address(es)</string>
+    <string name="no_network_hint">Connect Wi-Fi or enable USB tethering, then tap refresh.</string>
+
+    <!-- Settings: authentication -->
+    <string name="section_authentication">AUTHENTICATION</string>
+    <string name="basic_auth">Basic authentication</string>
+    <string name="auth_required_desc">Username and password required</string>
+    <string name="auth_disabled_desc">No authentication; anyone on the network can connect</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="copy_authenticated_url">Copy authenticated URL</string>
+
+    <!-- Settings: camera -->
+    <string name="section_camera">CAMERA</string>
+    <string name="selected_camera">Selected camera</string>
+    <string name="camera_with_id">%1$s · ID %2$s</string>
+    <string name="switch_lenses_hint">Switch lenses from the lens icon next to the flashlight.</string>
+    <string name="supported_resolutions">Supported resolutions</string>
+    <string name="frame_rates_at">Frame rates @ %1$s</string>
+    <string name="encoder_max_bitrate">H.264 encoder max: %1$d Mbps</string>
+
+    <!-- Settings: stream -->
+    <string name="section_stream_settings">STREAM SETTINGS</string>
+    <string name="rtsp_port">RTSP port</string>
+    <string name="resolution">Resolution</string>
+    <string name="frame_rate">Frame rate</string>
+    <string name="bitrate">Bitrate</string>
+    <string name="encoder_bitrate_warning">This phone\'s H.264 encoder is rated up to %1$d Mbps. Higher values may be capped or fail to start.</string>
+    <string name="stream_settings_apply">Stream settings apply on the next start.</string>
+
+    <!-- Settings: capabilities -->
+    <string name="section_camera_capabilities">CAMERA CAPABILITIES</string>
+    <string name="manual_iso_exposure">Manual ISO / exposure</string>
+    <string name="manual_focus">Manual focus</string>
+    <string name="white_balance_presets">White balance presets</string>
+    <string name="flash_torch">Flash / torch</string>
+    <string name="digital_zoom">Digital zoom</string>
+    <string name="presets_count">%1$d presets</string>
+    <string name="zoom_max">%1$.1fx max</string>
+    <string name="manual_unsupported_note">This camera does not expose AE OFF with ISO/exposure ranges, so the Manual panel stays disabled and automatic capture is used.</string>
+
+    <!-- Settings: about -->
+    <string name="section_about">ABOUT</string>
+    <string name="about_version">RemCam %1$s</string>
+    <string name="about_stack">Camera2 · MediaCodec H.264 · local RTSP server</string>
+    <string name="about_stream">Stream path: /camera · Latin-1-safe RTP payload. No cloud relay or external server.</string>
+
+    <!-- Manual panel -->
+    <string name="manual_controls">Manual controls</string>
+    <string name="hide_manual_controls">Hide manual controls</string>
+    <string name="param_iso">ISO</string>
+    <string name="param_exposure">Exposure</string>
+    <string name="param_focus">Focus</string>
+    <string name="param_wb">WB</string>
+    <string name="param_white_balance">White balance</string>
+    <string name="white_balance_auto">Auto</string>
+    <string name="infinity">Infinity</string>
+    <string name="wb_incandescent">Incandescent</string>
+    <string name="wb_warm_fluorescent">Warm fluorescent</string>
+    <string name="wb_fluorescent">Fluorescent</string>
+    <string name="wb_daylight">Daylight</string>
+    <string name="wb_cloudy">Cloudy</string>
+    <string name="wb_twilight">Twilight</string>
+    <string name="wb_shade">Shade</string>
+
+    <!-- Network interface labels -->
+    <string name="network_wifi">Wi-Fi</string>
+    <string name="network_usb_tethering">USB tethering</string>
+    <string name="network_ethernet">Ethernet</string>
+    <string name="network_hotspot">Hotspot</string>
+    <string name="network_mobile_data">Mobile data</string>
+    <string name="network_vpn">VPN</string>
+    <string name="network_other">Network</string>
+
+    <!-- Errors -->
+    <string name="error_unknown">Unknown error</string>
+    <string name="error_camera_permission_denied">Camera permission denied</string>
+    <string name="error_no_local_network">No local network address found. Connect Wi-Fi or enable USB tethering.</string>
+    <string name="error_camera_capabilities_unavailable">Camera capabilities are unavailable</string>
+    <string name="error_resolution_unsupported">Selected resolution is not supported by the current camera</string>
+    <string name="error_fps_unsupported">Selected frame rate is not supported for %1$s</string>
+    <string name="error_invalid_port">Enter a valid RTSP port between 1 and 65535</string>
+    <string name="error_auth_username">Enter an RTSP username or disable authentication</string>
+    <string name="error_auth_password">Enter an RTSP password or disable authentication</string>
+    <string name="error_no_local_address">No local network address found</string>
+    <string name="error_camera_not_available">Selected camera is not available</string>
+    <string name="error_requested_camera_unavailable">Requested camera is not available</string>
+    <string name="error_camera_config_unavailable">Camera stream configuration unavailable</string>
+    <string name="error_encoder_surface_unavailable">Encoder surface unavailable</string>
+    <string name="error_preview_surface_unavailable">Preview surface unavailable</string>
+    <string name="error_preview_surface_not_ready">Preview surface is not ready</string>
+    <string name="error_preview_view_not_attached">Preview view not attached</string>
+    <string name="error_no_output_surfaces">No output surfaces available</string>
+    <string name="error_no_camera_selected">No camera selected</string>
+    <string name="error_camera_disconnected">Camera disconnected</string>
+    <string name="error_camera_error">Camera error: %1$d</string>
+    <string name="error_failed_capture_session">Failed to configure camera capture session</string>
+    <string name="error_port_in_use">Port %1$d is already in use</string>
+    <string name="error_no_encoder_config">No compatible H.264 encoder configuration found</string>
+    <string name="error_encoder_rejected">This phone rejected the H.264 encoder settings. Try a lower resolution, frame rate, or bitrate.</string>
+    <string name="error_camera_session_start">Camera session could not start. Close other camera apps and try again.</string>
+    <string name="error_preview_not_ready_retry">Preview surface is not ready yet. Try again in a moment.</string>
+    <string name="error_camera_disconnected_start">Camera disconnected while starting. Try again.</string>
+    <string name="error_camera_timeout">The camera did not produce video in time. Manual settings were reset to Auto; try again or choose a lower resolution.</string>
+    <string name="error_failed_start_stream">Failed to start RTSP stream</string>
+    <string name="error_unable_open_camera">Unable to open camera</string>
+    <string name="error_manual_fallback">Manual settings stalled the stream. Switched to Auto and retried.</string>
+    <string name="error_manual_rejected">This camera rejected the manual settings. Switched back to auto.</string>
+    <string name="error_camera_request">Camera request failed: %1$s</string>
+    <string name="error_encoder_stopped">Video encoder stopped unexpectedly.</string>
+
+    <!-- Notification -->
+    <string name="notification_channel_name">Streaming</string>
+    <string name="notification_channel_description">Keeps the RemCam RTSP stream running in the background</string>
+    <string name="notification_title">RemCam streaming</string>
+    <string name="notification_text">Camera is streaming over RTSP</string>
+    <string name="notification_stop">Stop</string>
 </resources>

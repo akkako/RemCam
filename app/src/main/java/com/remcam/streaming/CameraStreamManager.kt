@@ -1,6 +1,7 @@
 package com.remcam.streaming
 
 import android.annotation.SuppressLint
+import androidx.annotation.StringRes
 import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
@@ -26,6 +27,7 @@ import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import com.remcam.BitratePreset
+import com.remcam.R
 import com.remcam.FpsPreset
 import com.remcam.ManualCapabilities
 import com.remcam.ManualControlValues
@@ -123,10 +125,12 @@ class CameraStreamManager(context: Context) {
     private var sessionPreviewGeneration = -1L
     private var previewGeneration = 0L
 
+    /** Camera currently opened by CameraDevice. */
     private var activeCameraId: String? = null
 
+    /** Camera requested by the UI / stream; may differ while switching. */
     @Volatile
-    private var activeLensFacing: Int = CameraCharacteristics.LENS_FACING_BACK
+    private var requestedCameraId: String? = null
 
     @Volatile
     private var activeStreamSize = Size(1280, 720)
@@ -387,34 +391,36 @@ class CameraStreamManager(context: Context) {
 
     /** Opens the camera for preview only (no encoder, no RTSP server). */
     suspend fun openPreview(
-        lensFacing: Int,
+        cameraId: String,
         fps: Int,
         resolution: ResolutionPreset
     ) {
         stateMutex.withLock {
             if (isStreaming) return
-            val selectedCameraId = findCameraId(lensFacing)
-                ?: throw IllegalStateException("Requested camera is not available")
-            val configurationMap = cameraManager.getCameraCharacteristics(selectedCameraId)
+            if (cameraId !in cameraManager.cameraIdList) {
+                throw IllegalStateException(str(R.string.error_requested_camera_unavailable))
+            }
+            val configurationMap = cameraManager.getCameraCharacteristics(cameraId)
                 .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                ?: throw IllegalStateException("Camera stream configuration unavailable")
+                ?: throw IllegalStateException(str(R.string.error_camera_config_unavailable))
             val requestedPreviewSize = chooseEncoderSize(
                 configurationMap,
                 Size(resolution.width, resolution.height)
             )
-            if (activeLensFacing == lensFacing &&
+            if (requestedCameraId == cameraId &&
+                activeCameraId == cameraId &&
                 cameraDevice != null &&
                 captureSession != null &&
                 activeStreamSize == requestedPreviewSize
             ) {
                 return
             }
-            if (activeLensFacing != lensFacing) {
+            if (requestedCameraId != cameraId) {
                 torchEnabled = false
                 currentZoomRatio = 1f
                 clearAutoFocus()
             }
-            activeLensFacing = lensFacing
+            requestedCameraId = cameraId
             activeFps = fps.coerceAtLeast(1)
             // Preview-only uses the same stream size as RTSP, so the framing
             // does not change when Start is pressed.
@@ -425,7 +431,7 @@ class CameraStreamManager(context: Context) {
     }
 
     suspend fun startStreaming(
-        lensFacing: Int,
+        cameraId: String,
         resolution: ResolutionPreset,
         fps: FpsPreset,
         bitrate: BitratePreset,
@@ -436,17 +442,17 @@ class CameraStreamManager(context: Context) {
         authPassword: String
     ): String {
         return stateMutex.withLock {
-            if (activeLensFacing != lensFacing) clearAutoFocus()
-            activeLensFacing = lensFacing
+            if (requestedCameraId != cameraId) clearAutoFocus()
+            requestedCameraId = cameraId
             activeFps = fps.fps
             stopStreamingInternal()
 
-            val selectedCameraId = findCameraId(activeLensFacing)
-                ?: throw IllegalStateException("Requested camera is not available")
+            val selectedCameraId = cameraId.takeIf { it in cameraManager.cameraIdList }
+                ?: throw IllegalStateException(str(R.string.error_requested_camera_unavailable))
             val characteristics = cameraManager.getCameraCharacteristics(selectedCameraId)
             val configurationMap = characteristics
                 .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                ?: throw IllegalStateException("Camera stream configuration unavailable")
+                ?: throw IllegalStateException(str(R.string.error_camera_config_unavailable))
 
             manualCapabilities = readManualControlCapabilities(characteristics)
             activeSensorOrientation = characteristics
@@ -530,7 +536,7 @@ class CameraStreamManager(context: Context) {
                     isStreaming = false
                     runCatching { stopStreamingInternal() }
                     runCatching { openCameraAndStartSession(includeEncoder = false) }
-                    throw IllegalStateException("Port $port is already in use")
+                    throw IllegalStateException(str(R.string.error_port_in_use, port))
                 } catch (error: Exception) {
                     Log.e(TAG_VIDEO_ENCODER, "Failed to start encoder/stream: ${error.message}", error)
                     isStreaming = false
@@ -550,7 +556,7 @@ class CameraStreamManager(context: Context) {
                             "Manual controls stalled the stream; retrying with automatic capture"
                         )
                         listener?.onManualControlsFailed(
-                            "Manual settings stalled the stream. Switched to Auto and retried."
+                            str(R.string.error_manual_fallback)
                         )
                         continue
                     }
@@ -636,11 +642,11 @@ class CameraStreamManager(context: Context) {
         if (!includeEncoder) awaitPreviewSurface()
 
         if (includeEncoder && videoSurface == null) {
-            throw IllegalStateException("Encoder surface unavailable")
+            throw IllegalStateException(str(R.string.error_encoder_surface_unavailable))
         }
 
-        val selectedCameraId = findCameraId(activeLensFacing)
-            ?: throw IllegalStateException("Requested camera is not available")
+        val selectedCameraId = requestedCameraId
+            ?: throw IllegalStateException(str(R.string.error_no_camera_selected))
 
         if (activeCameraId != selectedCameraId) {
             closeCameraInternal()
@@ -651,7 +657,7 @@ class CameraStreamManager(context: Context) {
         val characteristics = cameraManager.getCameraCharacteristics(selectedCameraId)
         val configurationMap = characteristics
             .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            ?: throw IllegalStateException("Camera stream configuration unavailable")
+            ?: throw IllegalStateException(str(R.string.error_camera_config_unavailable))
 
         manualCapabilities = readManualControlCapabilities(characteristics)
         activeSensorOrientation = characteristics
@@ -687,7 +693,7 @@ class CameraStreamManager(context: Context) {
 
         val hasPreview = ensurePreviewSurfaceLocked()
         if (!includeEncoder && !hasPreview) {
-            throw IllegalStateException("Preview surface is not ready")
+            throw IllegalStateException(str(R.string.error_preview_surface_not_ready))
         }
 
         // Match the streaming session's output count so the HAL keeps the
@@ -701,16 +707,16 @@ class CameraStreamManager(context: Context) {
 
         val surfaces = buildList {
             if (hasPreview) {
-                add(previewSurface ?: throw IllegalStateException("Preview surface unavailable"))
+                add(previewSurface ?: throw IllegalStateException(str(R.string.error_preview_surface_unavailable)))
             }
             if (includeEncoder) {
-                add(videoSurface ?: throw IllegalStateException("Encoder surface unavailable"))
+                add(videoSurface ?: throw IllegalStateException(str(R.string.error_encoder_surface_unavailable)))
             } else {
                 auxSurface?.let { add(it) }
             }
         }
         if (surfaces.isEmpty()) {
-            throw IllegalStateException("No output surfaces available")
+            throw IllegalStateException(str(R.string.error_no_output_surfaces))
         }
 
         runCatching { captureSession?.close() }
@@ -876,16 +882,16 @@ class CameraStreamManager(context: Context) {
                 if (recovered.isSuccess) {
                     Log.w(TAG_VIDEO_ENCODER, "Manual controls failed; fell back to automatic capture")
                     listener?.onManualControlsFailed(
-                        "This camera rejected the manual settings. Switched back to auto."
+                        str(R.string.error_manual_rejected)
                     )
                 } else {
                     listener?.onCameraRequestFailed(
-                        "Camera request failed: ${error.message ?: "unknown error"}"
+                        str(R.string.error_camera_request, error.message ?: str(R.string.error_unknown))
                     )
                 }
             } else {
                 listener?.onCameraRequestFailed(
-                    "Camera request failed: ${error.message ?: "unknown error"}"
+                    str(R.string.error_camera_request, error.message ?: str(R.string.error_unknown))
                 )
             }
         }
@@ -1120,7 +1126,7 @@ class CameraStreamManager(context: Context) {
             } catch (error: Exception) {
                 if (isActive) {
                     Log.e(TAG_VIDEO_ENCODER, "Encoder output loop failed: ${error.message}", error)
-                    listener?.onCameraRequestFailed("Video encoder stopped unexpectedly.")
+                    listener?.onCameraRequestFailed(str(R.string.error_encoder_stopped))
                 }
             }
             Log.i(TAG_VIDEO_ENCODER, "Encoder output loop finished")
@@ -1217,28 +1223,30 @@ class CameraStreamManager(context: Context) {
             }
         }
 
-        throw IllegalStateException("No compatible H.264 encoder configuration found", lastError)
+        throw IllegalStateException(str(R.string.error_no_encoder_config), lastError)
     }
 
     private fun buildStartFailureMessage(error: Exception): String {
         val message = error.message?.takeIf { it.isNotBlank() }
-            ?: return "Failed to start RTSP stream"
+            ?: return str(R.string.error_failed_start_stream)
         return when {
-            "No compatible H.264 encoder configuration found" in message ->
-                "This phone rejected the H.264 encoder settings. Try a lower resolution, frame rate, or bitrate."
+            message == str(R.string.error_no_encoder_config) ||
+                "No compatible H.264 encoder configuration found" in message ->
+                str(R.string.error_encoder_rejected)
 
-            "Failed to configure camera capture session" in message ->
-                "Camera session could not start. Close other camera apps and try again."
+            message == str(R.string.error_failed_capture_session) ||
+                "Failed to configure camera capture session" in message ->
+                str(R.string.error_camera_session_start)
 
-            "Preview surface is not ready" in message ->
-                "Preview surface is not ready yet. Try again in a moment."
+            message == str(R.string.error_preview_surface_not_ready) ||
+                "Preview surface is not ready" in message ->
+                str(R.string.error_preview_not_ready_retry)
 
-            "Camera disconnected" in message ->
-                "Camera disconnected while starting. Try again."
+            message == str(R.string.error_camera_disconnected) ||
+                "Camera disconnected" in message ->
+                str(R.string.error_camera_disconnected_start)
 
-            "Timed out waiting" in message ->
-                "The camera did not produce video in time. Manual settings were reset to Auto; " +
-                    "try again or choose a lower resolution."
+            "Timed out waiting" in message -> str(R.string.error_camera_timeout)
 
             else -> message
         }
@@ -1250,7 +1258,7 @@ class CameraStreamManager(context: Context) {
     )
 
     private suspend fun awaitPreviewSurface() {
-        if (textureView == null) throw IllegalStateException("Preview view not attached")
+        if (textureView == null) throw IllegalStateException(str(R.string.error_preview_view_not_attached))
         withTimeout(5_000) { surfaceReady.await() }
     }
 
@@ -1271,10 +1279,10 @@ class CameraStreamManager(context: Context) {
                     if (cameraDevice === camera) cameraDevice = null
                     if (continuation.isActive) {
                         continuation.resumeWithException(
-                            IllegalStateException("Camera disconnected")
+                            IllegalStateException(str(R.string.error_camera_disconnected))
                         )
                     } else {
-                        listener?.onCameraDisconnected("Camera disconnected")
+                        listener?.onCameraDisconnected(str(R.string.error_camera_disconnected))
                     }
                 }
 
@@ -1283,10 +1291,10 @@ class CameraStreamManager(context: Context) {
                     if (cameraDevice === camera) cameraDevice = null
                     if (continuation.isActive) {
                         continuation.resumeWithException(
-                            IllegalStateException("Camera error: $error")
+                            IllegalStateException(str(R.string.error_camera_error, error))
                         )
                     } else {
-                        listener?.onCameraDisconnected("Camera error: $error")
+                        listener?.onCameraDisconnected(str(R.string.error_camera_error, error))
                     }
                 }
             }, cameraHandler)
@@ -1308,7 +1316,7 @@ class CameraStreamManager(context: Context) {
             override fun onConfigureFailed(session: CameraCaptureSession) {
                 if (continuation.isActive) {
                     continuation.resumeWithException(
-                        IllegalStateException("Failed to configure camera capture session")
+                        IllegalStateException(str(R.string.error_failed_capture_session))
                     )
                 }
             }
@@ -1328,12 +1336,8 @@ class CameraStreamManager(context: Context) {
         releasePreviewSurfaceLocked()
     }
 
-    private fun findCameraId(lensFacing: Int): String? {
-        return cameraManager.cameraIdList.firstOrNull { cameraId ->
-            cameraManager.getCameraCharacteristics(cameraId)
-                .get(CameraCharacteristics.LENS_FACING) == lensFacing
-        }
-    }
+    private fun str(@StringRes id: Int, vararg args: Any): String =
+        appContext.getString(id, *args)
 
     private fun chooseEncoderSize(
         configurationMap: StreamConfigurationMap,

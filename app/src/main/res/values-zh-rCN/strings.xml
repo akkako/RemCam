@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Common -->
+    <string name="copied_to_clipboard">已复制到剪贴板</string>
+    <string name="close_settings">关闭设置</string>
+    <string name="copy_address_url">复制 %1$s 地址</string>
+    <string name="copy_stream_url">复制串流地址</string>
+    <string name="dismiss_error">关闭错误提示</string>
+    <string name="retry">重试</string>
+    <string name="settings">设置</string>
+    <string name="auto">自动</string>
+    <string name="manual">手动</string>
+    <string name="reset">重置</string>
+    <string name="supported">支持</string>
+    <string name="not_available">不可用</string>
+
+    <!-- Camera labels and status -->
+    <string name="camera_back">后摄</string>
+    <string name="camera_back_numbered">后摄 %1$d</string>
+    <string name="camera_front">前摄</string>
+    <string name="camera_front_numbered">前摄 %1$d</string>
+    <string name="camera_external">外接</string>
+    <string name="camera_fallback">相机</string>
+    <string name="select_camera">选择相机</string>
+    <string name="status_live">直播中</string>
+    <string name="status_starting">启动中</string>
+    <string name="status_stopping">停止中</string>
+    <string name="status_error">错误</string>
+    <string name="status_ready">就绪</string>
+    <string name="status_camera_off">相机未开启</string>
+    <string name="status_lens_resolution">%1$s · %2$dp</string>
+    <string name="torch_on">打开闪光灯</string>
+    <string name="torch_off">关闭闪光灯</string>
+    <string name="start_streaming">开始推流</string>
+    <string name="stop_streaming">停止推流</string>
+    <string name="zoom_in">放大</string>
+    <string name="zoom_out">缩小</string>
+
+    <!-- Permission / camera state -->
+    <string name="permission_title">需要相机权限</string>
+    <string name="permission_body">RemCam 需要访问相机，以便在本机显示预览并通过 RTSP 在局域网内推流。除非有客户端主动连接，视频不会离开你的局域网。</string>
+    <string name="permission_button">允许访问相机</string>
+    <string name="opening_camera">正在打开相机</string>
+    <string name="camera_unavailable">相机不可用</string>
+
+    <!-- Settings header -->
+    <string name="settings_title">设置</string>
+    <string name="settings_subtitle">RemCam · %1$s 相机</string>
+
+    <!-- Settings: RTSP -->
+    <string name="section_rtsp_stream">RTSP 串流</string>
+    <string name="stream_url_no_auth">串流地址（无认证）</string>
+    <string name="stream_url_authenticated">已认证串流地址</string>
+    <string name="no_local_address">无本地地址</string>
+    <string name="refresh_network">刷新网络</string>
+    <string name="no_ipv4_addresses">无 IPv4 地址</string>
+    <string name="address_count">%1$d 个地址</string>
+    <string name="no_network_hint">请连接 Wi-Fi 或开启 USB 网络共享，然后点击刷新。</string>
+
+    <!-- Settings: authentication -->
+    <string name="section_authentication">认证</string>
+    <string name="basic_auth">Basic 认证</string>
+    <string name="auth_required_desc">需要用户名和密码</string>
+    <string name="auth_disabled_desc">无认证；局域网内任何人都可以连接</string>
+    <string name="username">用户名</string>
+    <string name="password">密码</string>
+    <string name="copy_authenticated_url">复制带认证的地址</string>
+
+    <!-- Settings: camera -->
+    <string name="section_camera">相机</string>
+    <string name="selected_camera">当前相机</string>
+    <string name="camera_with_id">%1$s · ID %2$s</string>
+    <string name="switch_lenses_hint">通过闪光灯旁的镜头图标切换相机。</string>
+    <string name="supported_resolutions">支持的分辨率</string>
+    <string name="frame_rates_at">%1$s 的帧率</string>
+    <string name="encoder_max_bitrate">H.264 编码器上限：%1$d Mbps</string>
+
+    <!-- Settings: stream -->
+    <string name="section_stream_settings">串流设置</string>
+    <string name="rtsp_port">RTSP 端口</string>
+    <string name="resolution">分辨率</string>
+    <string name="frame_rate">帧率</string>
+    <string name="bitrate">码率</string>
+    <string name="encoder_bitrate_warning">该手机的 H.264 编码器最高支持 %1$d Mbps。更高的值可能被限制或导致启动失败。</string>
+    <string name="stream_settings_apply">串流设置将在下次开始时生效。</string>
+
+    <!-- Settings: capabilities -->
+    <string name="section_camera_capabilities">相机能力</string>
+    <string name="manual_iso_exposure">手动 ISO / 曝光</string>
+    <string name="manual_focus">手动对焦</string>
+    <string name="white_balance_presets">白平衡预设</string>
+    <string name="flash_torch">闪光灯 / 手电筒</string>
+    <string name="digital_zoom">数码变焦</string>
+    <string name="presets_count">%1$d 个预设</string>
+    <string name="zoom_max">最大 %1$.1fx</string>
+    <string name="manual_unsupported_note">该相机不支持 AE OFF 与 ISO/曝光范围，因此手动面板不可用，将使用自动曝光。</string>
+
+    <!-- Settings: about -->
+    <string name="section_about">关于</string>
+    <string name="about_version">RemCam %1$s</string>
+    <string name="about_stack">Camera2 · MediaCodec H.264 · 本地 RTSP 服务</string>
+    <string name="about_stream">串流路径：/camera · Latin-1 安全的 RTP 载荷。无云端中转或外部服务器。</string>
+
+    <!-- Manual panel -->
+    <string name="manual_controls">手动控制</string>
+    <string name="hide_manual_controls">收起手动控制</string>
+    <string name="param_iso">ISO</string>
+    <string name="param_exposure">曝光</string>
+    <string name="param_focus">对焦</string>
+    <string name="param_wb">白平衡</string>
+    <string name="param_white_balance">白平衡</string>
+    <string name="white_balance_auto">自动</string>
+    <string name="infinity">无限远</string>
+    <string name="wb_incandescent">白炽灯</string>
+    <string name="wb_warm_fluorescent">暖色荧光灯</string>
+    <string name="wb_fluorescent">荧光灯</string>
+    <string name="wb_daylight">日光</string>
+    <string name="wb_cloudy">阴天</string>
+    <string name="wb_twilight">黄昏</string>
+    <string name="wb_shade">阴影</string>
+
+    <!-- Network interface labels -->
+    <string name="network_wifi">Wi-Fi</string>
+    <string name="network_usb_tethering">USB 网络共享</string>
+    <string name="network_ethernet">以太网</string>
+    <string name="network_hotspot">热点</string>
+    <string name="network_mobile_data">移动数据</string>
+    <string name="network_vpn">VPN</string>
+    <string name="network_other">网络</string>
+
+    <!-- Errors -->
+    <string name="error_unknown">未知错误</string>
+    <string name="error_camera_permission_denied">相机权限被拒绝</string>
+    <string name="error_no_local_network">未找到本地网络地址。请连接 Wi-Fi 或开启 USB 网络共享。</string>
+    <string name="error_camera_capabilities_unavailable">相机能力不可用</string>
+    <string name="error_resolution_unsupported">当前相机不支持所选分辨率</string>
+    <string name="error_fps_unsupported">当前相机不支持 %1$s 的帧率</string>
+    <string name="error_invalid_port">请输入 1–65535 之间的有效 RTSP 端口</string>
+    <string name="error_auth_username">请输入 RTSP 用户名，或关闭认证</string>
+    <string name="error_auth_password">请输入 RTSP 密码，或关闭认证</string>
+    <string name="error_no_local_address">未找到本地网络地址</string>
+    <string name="error_camera_not_available">所选相机不可用</string>
+    <string name="error_requested_camera_unavailable">请求的相机不可用</string>
+    <string name="error_camera_config_unavailable">相机串流配置不可用</string>
+    <string name="error_encoder_surface_unavailable">编码器 Surface 不可用</string>
+    <string name="error_preview_surface_unavailable">预览 Surface 不可用</string>
+    <string name="error_preview_surface_not_ready">预览 Surface 尚未就绪</string>
+    <string name="error_preview_view_not_attached">预览视图未连接</string>
+    <string name="error_no_output_surfaces">没有可用的输出 Surface</string>
+    <string name="error_no_camera_selected">未选择相机</string>
+    <string name="error_camera_disconnected">相机已断开</string>
+    <string name="error_camera_error">相机错误：%1$d</string>
+    <string name="error_failed_capture_session">相机采集会话配置失败</string>
+    <string name="error_port_in_use">端口 %1$d 已被占用</string>
+    <string name="error_no_encoder_config">未找到兼容的 H.264 编码器配置</string>
+    <string name="error_encoder_rejected">该手机拒绝了 H.264 编码器设置。请尝试较低的分辨率、帧率或码率。</string>
+    <string name="error_camera_session_start">相机会话无法启动。请关闭其他相机应用后重试。</string>
+    <string name="error_preview_not_ready_retry">预览尚未就绪，请稍后重试。</string>
+    <string name="error_camera_disconnected_start">启动过程中相机断开，请重试。</string>
+    <string name="error_camera_timeout">相机未能及时输出视频。手动设置已重置为自动；请重试或选择较低分辨率。</string>
+    <string name="error_failed_start_stream">启动 RTSP 串流失败</string>
+    <string name="error_unable_open_camera">无法打开相机</string>
+    <string name="error_manual_fallback">手动设置导致串流卡住，已切换到自动并重试。</string>
+    <string name="error_manual_rejected">该相机拒绝了手动设置，已切回自动。</string>
+    <string name="error_camera_request">相机请求失败：%1$s</string>
+    <string name="error_encoder_stopped">视频编码器意外停止。</string>
+
+    <!-- Notification -->
+    <string name="notification_channel_name">串流</string>
+    <string name="notification_channel_description">在后台保持 RemCam RTSP 串流运行</string>
+    <string name="notification_title">RemCam 串流</string>
+    <string name="notification_text">相机正在通过 RTSP 串流</string>
+    <string name="notification_stop">停止</string>
+</resources>
