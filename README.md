@@ -1,130 +1,180 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # RemCam
 
 [![Build Release APK](https://github.com/akkako/RemCam/actions/workflows/android-release.yml/badge.svg)](https://github.com/akkako/RemCam/actions/workflows/android-release.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-RemCam 是一个把 Android 手机变成局域网 RTSP 摄像头的应用：使用 Camera2 采集画面，MediaCodec 编码 H.264 或 H.265（设备支持硬件编码时），在手机本地启动 RTSP/RTP 服务，局域网内的播放器（VLC、ffplay、GStreamer 等）可以直接拉流。
+RemCam turns an Android phone into a LAN RTSP camera. It captures with Camera2, encodes H.264 or H.265 with MediaCodec, and serves the stream locally over RTSP/RTP. VLC, ffplay, GStreamer and other RTSP clients can connect without a cloud relay.
 
-## 功能
+New to RemCam? Start with the [User Guide](USER_GUIDE.md).
 
-- **本地 RTSP 串流**：内置轻量 RTSP 服务器，默认端口 `8554`，流地址为 `rtsp://<手机IP>:8554/camera`。
-- **H.264 / H.265 编码**：MediaCodec 硬件编码，支持分辨率、帧率、码率选择；默认 H.264，设备有硬件 HEVC 编码器时可在设置中切换 H.265。
-- **TCP / UDP 客户端**：支持 RTP/AVP/TCP interleaved 和 RTP/AVP UDP，多个客户端可同时连接。
-- **可选 Basic 认证**：设置用户名/密码后，客户端需要认证才能拉流。
-- **后台串流**：前台服务保活；按 Home、锁屏后相机、编码器和 RTSP 服务继续运行。
-- **多镜头选择**：顶部左上角的镜头菜单直接选择 Camera2 相机（主摄、超广角、前摄等），设置页会列出当前相机支持的录制参数。
-- **相机控制**：手电筒、点击对焦（自动模式）、双指缩放、+/- 变焦。
-- **手动模式**：ISO、曝光时间、手动对焦、白平衡预设；从自动切到手动时以当前自动曝光/ISO/对焦/白平衡为起点，可在此基础上微调。手动对焦范围按当前相机上报的能力值（无穷远到最近对焦距离）限制。
-- **相机风格 UI**：竖屏全屏预览、浮层控件、顶部左侧镜头菜单、底部左侧 Auto/Manual 小胶囊与底部居中快门。
-- **网络地址管理**：列出 Wi-Fi / USB tethering 等本地 IPv4 地址，可刷新、复制 RTSP URL。
+## Features
 
-## 环境要求
+- **Local RTSP streaming** — built-in RTSP server on port `8554`, stream URL `rtsp://<phone-ip>:8554/camera`.
+- **H.264 / H.265** — hardware MediaCodec encoding with selectable resolution, frame rate and bitrate. H.264 is the default; H.265 appears when the device exposes a hardware HEVC encoder.
+- **TCP and UDP clients** — RTP/AVP/TCP interleaved and RTP/AVP UDP, with multiple simultaneous clients.
+- **Optional Basic authentication** — username/password protection for the stream.
+- **Background streaming** — a foreground service keeps the camera, encoder and RTSP server alive when the app is in the background.
+- **Network address management** — lists local IPv4 addresses for Wi-Fi, USB tethering and other interfaces, with copyable RTSP URLs.
+- **Multi-lens selection** — choose any Camera2 camera ID (main, ultra-wide, front, etc.) from the lens button. The Settings page lists the selected camera's recording capabilities.
+- **Camera controls** — torch, tap-to-focus, pinch zoom and +/− zoom buttons.
+- **Manual mode** — ISO, exposure time, manual focus and white-balance presets. Switching from Auto to Manual starts from the current auto exposure, ISO, focus and white balance, so the image does not jump.
+- **Camera-style UI** — portrait full-frame preview, floating controls and a compact segmented Auto/Manual pill.
+- **Localized UI** — English and Simplified Chinese, with a structure ready for more languages.
+- **Optimized release build** — R8 minification, resource shrinking and debug-log stripping.
 
-| 项目 | 要求 |
+## Download
+
+Grab the latest universal APK from [Releases](https://github.com/akkako/RemCam/releases/latest). It contains native libraries for both `arm64-v8a` and `armeabi-v7a`, so it works on modern 64-bit phones as well as older 32-bit ARM devices.
+
+> CI builds are signed with the debug keystore. For production distribution, configure your own signing key.
+
+## Requirements
+
+| Item | Requirement |
 | --- | --- |
-| Android | 8.0（API 26）及以上 |
-| 编译 SDK | API 37 |
+| Android | 8.0 (API 26) or newer |
+| Compile SDK | API 37 |
 | JDK | Java 17 |
-| 构建工具 | Gradle Wrapper 9.6.0，Android Gradle Plugin 9.4.0 |
-| Kotlin / Compose | Kotlin 2.2.10，Compose BOM 2026.02.01 |
+| Build tools | Gradle 9.6.0, Android Gradle Plugin 9.4.0 |
+| Kotlin / Compose | Kotlin 2.2.10, Compose BOM 2026.02.01 |
 
-## 构建与安装
+## Build
 
-在项目根目录创建 `local.properties`（该文件已被 `.gitignore` 忽略）：
+Create `local.properties` in the project root (already ignored by Git):
 
 ```properties
 sdk.dir=C\:\\path\\to\\Android\\Sdk
 ```
 
-构建 Debug APK：
+### Debug APK
 
 ```bash
 ./gradlew :app:assembleDebug
-```
-
-安装到已连接的设备：
-
-```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-或直接运行：
+Or build and install in one step:
 
 ```bash
 ./gradlew :app:installDebug
 ```
 
-构建 Release APK（开启 R8 代码压缩/混淆、资源收缩和 PNG 优化，并移除调试日志）：
+### Release APK
 
 ```bash
 ./gradlew :app:assembleRelease
 adb install -r "$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)"
 ```
 
-发布版通过 ProGuard 规则移除 `Log.v/d/i` 调用，只保留 `Log.w/e`；APK 不含 `android:debuggable` 标志，体积约为 Debug 版的十分之一。
+The release build enables R8 code shrinking/obfuscation, resource shrinking and PNG optimization. `Log.v/d/i` calls are removed; warnings and errors are kept. The APK is not debuggable and is roughly one tenth the size of the debug build.
 
-> Release 构建目前复用 debug 签名配置（见 `app/build.gradle.kts`）。正式发布前请替换为自己的签名。
+### Release signing
 
-### GitHub Actions 自动构建
+By default, release builds are signed with the Android debug keystore so the APK can be installed immediately. This is convenient for testing, but it has important consequences:
 
-推送到 `main` 或推送 `v*` 标签时，GitHub Actions 会自动构建通用 Release APK；也可以在 Actions 页面手动运行工作流。
+- The debug key is not secret; anyone who has it can sign an APK that Android accepts as an update.
+- A debug keystore generated on another machine or CI run produces a different signature. Android will refuse to update an app signed with another key; users must uninstall first.
+- Google Play and most distribution channels require a proper release key.
 
-- 通用 APK 同时包含 `arm64-v8a` 和 `armeabi-v7a`（以及 `x86`/`x86_64`）原生库，没有 ABI 拆分。
-- 工作流结束后可在对应的 Actions 运行记录中下载 `RemCam-release-*` artifact。
-- 推送 `v*` 标签时，APK 会自动附加到同名的 GitHub Release。
-- 工作流文件：`.github/workflows/android-release.yml`。
+To use your own key, generate a keystore and create `keystore.properties` in the project root. Both files are ignored by Git:
 
-## 性能
+```bash
+keytool -genkeypair -v \
+  -keystore remcam-release.jks \
+  -alias remcam \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
 
-- 编码输出复用同一个访问单元缓冲区，30 fps 下不再每帧分配大块 `ByteArray`。
-- RTSP 发送端直接按偏移量引用 NAL 单元，零拷贝拆分；TCP 将一帧的所有 RTP 包拼进缓冲区后只执行一次 socket 写入和 flush，UDP 也复用包缓冲区。
-- 网络 socket 使用 512 KB 发送缓冲，关键帧突发时不易阻塞编码线程。
-- Release 构建启用 R8 与资源收缩，并剥离调试/信息级日志。
+`keystore.properties`:
 
-## 使用方法
+```properties
+storeFile=remcam-release.jks
+storePassword=...
+keyAlias=remcam
+keyPassword=...
+```
 
-1. 启动应用，授予相机权限；Android 13+ 会请求通知权限，Android 17+ 会请求本地网络权限。
-2. 右上角齿轮进入设置，选择分辨率、帧率、码率、RTSP 端口，按需开启 Basic 认证。
-3. 点击底部中央快门开始串流；状态胶囊显示 `Live`，顶部会出现可复制的 RTSP 地址。
-4. 局域网内用客户端打开：
+Build as usual. `app/build.gradle.kts` automatically uses this configuration when all four fields are present; otherwise it falls back to the debug key.
+
+> Switching from a debug-signed install to a release-signed install requires uninstalling the old app once. After that, every build signed with the same release key can update in place. The GitHub Actions workflow still uses debug signing by default; to sign CI builds with your release key, provide the keystore and credentials as repository secrets and write `keystore.properties` before the build step.
+
+### GitHub Actions
+
+The workflow at `.github/workflows/android-release.yml` builds a universal release APK on every push to `main`, every `v*` tag and manual dispatch.
+
+- The APK is uploaded as a `RemCam-release-<ref>` artifact.
+- Every build verifies that both `arm64-v8a` and `armeabi-v7a` are present.
+- A `v*` tag also creates a GitHub Release and attaches `RemCam-<tag>-universal.apk`.
+
+## Usage
+
+For a complete step-by-step walkthrough, see the [User Guide](USER_GUIDE.md).
+
+1. Launch the app and grant camera permission. Android 13+ also asks for notification permission; Android 17+ asks for local-network permission.
+2. Open Settings with the gear icon. Choose the camera, codec, resolution, frame rate, bitrate and RTSP port.
+3. Tap the center shutter to start streaming. The status pill switches to `Live` and the RTSP URL appears briefly at the top.
+4. Open the URL from another device on the same network:
 
 ```bash
 ffplay -rtsp_transport tcp rtsp://192.168.1.10:8554/camera
 ```
 
-VLC：媒体 → 打开网络串流，输入同一地址。
+In VLC: **Media → Open Network Stream**, then enter the same URL.
 
-带认证的地址格式：
+With Basic authentication enabled, include the credentials in the URL:
 
 ```text
 rtsp://username:password@192.168.1.10:8554/camera
 ```
 
-再次点击快门停止串流。串流过程中按 Home 键或锁屏，应用会通过前台服务继续保持相机、编码器和 RTSP 服务运行；通知栏提供 Stop 操作。
+Tap the shutter again to stop. You can also press Home or lock the screen while streaming; the foreground service keeps the camera and stream running. The notification offers a Stop action.
 
-## 设置项
+## Settings
 
-- **RTSP port**：默认 `8554`，范围 1–65535。
-- **Resolution**：相机支持的 16:9 分辨率列表，默认 `1280 x 720`。
-- **Frame rate**：按分辨率和相机能力过滤，默认 30 fps。
-- **Video codec**：H.264（默认）或 H.265（仅当设备暴露硬件 HEVC 编码器时出现），切换后下次 Start 生效。
-- **Bitrate**：4–250 Mbps；高于编码器上限时设置页会给出警告。
-- **Basic authentication**：用户名/密码，可选；启用后未认证客户端会收到 401。
-- **Refresh network**：刷新本地 IPv4 地址列表。
-- **Camera**：显示当前相机、相机 ID、焦距/最大分辨率，以及该相机支持的分辨率和帧率。
-- **Camera capabilities**：显示是否支持手动 ISO/曝光、手动对焦、白平衡预设、闪光灯和数字变焦。
+- **RTSP port** — default `8554`, range 1–65535.
+- **Video codec** — H.264 or H.265. H.265 is only offered when a hardware HEVC encoder exists.
+- **Resolution** — 16:9 sizes reported by the selected camera.
+- **Frame rate** — filtered by the selected resolution and the camera's capabilities.
+- **Bitrate** — 4–250 Mbps; the Settings page warns when the value exceeds the encoder's maximum.
+- **Basic authentication** — optional username and password.
+- **Refresh network** — refreshes the list of local IPv4 addresses (Wi-Fi, USB tethering, etc.).
+- **Camera** — selected camera label, ID, focal length, maximum resolution, supported resolutions and frame rates.
+- **Camera capabilities** — manual ISO/exposure, manual focus, white-balance presets, flash and digital zoom.
 
-串流参数在下次点击 Start 时生效；手动模式参数可实时调整。
+Streaming settings take effect on the next Start. Manual values can be adjusted live.
 
-## UI 说明
+## UI Overview
 
-- 竖屏锁定，全屏显示相机画面。
-- 顶部：左侧镜头菜单、中间状态胶囊（`Ready / Live / Starting / Stopping / Error` + 相机/分辨率）、右侧手电筒（有闪光灯时）和设置入口。
-- 底部为浮层控件：左侧 Auto/Manual 小胶囊（与变焦胶囊同尺寸）、居中快门、右侧变焦胶囊；相机切换只通过顶部左侧镜头菜单完成。
-- 开始串流后顶部短暂显示 RTSP URL 横幅，可一键复制。
-- 手动模式会展开圆角手动控制卡片：参数 chip + 滑杆，支持 Reset 和收起。
+- **Top-left** — camera/lens selection button.
+- **Top-center** — status pill (`Ready / Live / Starting / Stopping / Error`) with camera and resolution.
+- **Top-right** — torch (when available) and Settings.
+- **Bottom-left** — Auto/Manual segmented pill, the same size as the zoom pill.
+- **Bottom-center** — shutter button.
+- **Bottom-right** — digital zoom pill.
+- The Auto/Manual and zoom pills are arranged symmetrically around the shutter.
 
-## 项目结构
+In Manual mode, a rounded control card expands above the bottom bar with parameter chips and a slider, plus Reset and Hide actions.
+
+The UI is portrait-only by design. The RTSP stream carries the camera sensor's native orientation (usually landscape); the portrait preview is the app's viewfinder. Rotate on the client if a different orientation is required.
+
+## Manual Mode
+
+- When you switch from Auto to Manual, RemCam snapshots the current auto exposure, ISO, lens focus distance and white-balance mode, then applies them in a single capture request. The first manual frame therefore matches the auto image instead of jumping to defaults.
+- Manual focus is limited to the selected camera's reported range: `0` (infinity) up to `LENS_INFO_MINIMUM_FOCUS_DISTANCE`. No distance is hard-coded, so each camera uses its own physical capabilities.
+- Invalid focus readings such as `-1` while autofocus is idle are ignored; the last valid lens position is retained.
+- White balance includes an **Auto** option, so manual exposure/ISO/focus can be combined with automatic white balance.
+- If a device rejects a manual request, the app falls back to automatic capture and shows an error banner.
+
+## Performance
+
+- The encoder reuses one access-unit buffer instead of allocating a large `ByteArray` per frame.
+- NAL units are parsed by offset without copying; TCP batches all RTP packets of a frame into one buffer and performs a single socket write/flush.
+- UDP reuses its packet buffer, and sockets use a 512 KB send buffer to absorb keyframe bursts.
+- The release build uses R8 and resource shrinking; verbose/debug/info logs are stripped.
+
+## Project Structure
 
 ```text
 remcam/
@@ -133,91 +183,56 @@ remcam/
 │   └── src/main/
 │       ├── AndroidManifest.xml
 │       ├── java/com/remcam/
-│       │   ├── RemCamActivity.kt          # Activity，竖屏锁定 + edge-to-edge
-│       │   ├── RemCamScreen.kt            # Compose 相机 UI、预览层、权限、对焦/缩放手势
-│       │   ├── RemCamStreamService.kt     # 串流前台服务
-│       │   ├── RemCamViewModel.kt         # UI 状态、设置持久化、预览生命周期
-│       │   ├── StreamModels.kt            # UI 状态与相机/手动控制模型
+│       │   ├── RemCamActivity.kt          # Activity, portrait lock, edge-to-edge
+│       │   ├── RemCamScreen.kt            # Compose camera UI, preview, gestures
+│       │   ├── RemCamStreamService.kt     # Foreground streaming service
+│       │   ├── RemCamViewModel.kt         # UI state, settings persistence, lifecycle
+│       │   ├── StreamModels.kt            # UI/camera/manual models
 │       │   ├── streaming/
-│       │   │   ├── RemCamEngine.kt        # 应用级相机/串流引擎（单例）
-│       │   │   ├── CameraStreamManager.kt # Camera2、CaptureSession、MediaCodec、手动控制
-│       │   │   ├── CameraCapabilities.kt  # 相机能力与分辨率/FPS 读取
-│       │   │   └── RtspServer.kt          # RTSP/RTP 服务（TCP/UDP、Basic Auth）
-│       │   └── ui/
-│       │       ├── components/
-│       │       │   ├── Controls.kt        # 快门、变焦、状态点等
-│       │       │   ├── ManualControlPanel.kt
-│       │       │   └── SettingsSheet.kt
-│       │       └── theme/
-│       └── res/
-├── gradle/wrapper/
-├── build.gradle.kts
-├── settings.gradle.kts
-├── gradlew / gradlew.bat
-├── .gitignore
-└── README.md
+│       │   │   ├── RemCamEngine.kt        # Application-scoped camera/stream engine
+│       │   │   ├── CameraStreamManager.kt # Camera2 sessions, MediaCodec, capture controls
+│       │   │   ├── CameraCapabilities.kt  # Camera, resolution and codec capabilities
+│       │   │   └── RtspServer.kt          # RTSP/RTP server (TCP/UDP, Basic Auth)
+│       │   └── ui/                        # Compose controls, theme, settings sheet
+│       └── res/                           # Strings, locales, icons
+├── .github/workflows/android-release.yml  # CI release build
+├── LICENSE
+├── README.md
+├── README.zh-CN.md
+├── USER_GUIDE.md
+└── USER_GUIDE.zh-CN.md
 ```
 
-## 架构与数据流
+## Troubleshooting
 
-```text
-Compose UI (RemCamScreen)
-        │  collectAsState
-RemCamViewModel ── SharedPreferences（端口/分辨率/帧率/码率/认证等）
-        │
-        ▼
-RemCamEngine（Application 级单例，StateFlow）
-        │
-        ├── CameraStreamManager ── Camera2 + MediaCodec(H.264/H.265) + 手动/对焦/变焦/手电筒
-        └── RtspServer ── RTSP 信令 + RTP 封包（FU-A）+ SDP
-        │
-RemCamStreamService（前台服务，保持进程与相机存活）
+- **Port already in use** — choose another RTSP port or stop the process using it.
+- **No local network address** — connect Wi-Fi or enable USB tethering, then tap Refresh network.
+- **Manual mode rejected** — some HALs reject manual AE/AF combinations. The app automatically falls back to Auto and retries once.
+- **H.265 will not play** — make sure the client supports HEVC. VLC and ffmpeg usually do; some TVs and mobile players do not.
+- Check the stream with:
+
+```bash
+ffprobe -v error -rtsp_transport tcp \
+  -show_entries stream=codec_name,width,height,r_frame_rate \
+  -of default=nw=1 rtsp://<phone-ip>:8554/camera
 ```
 
-### 会话模式
-
-- **预览模式**：相机输出到预览 `TextureView`，同时挂一路同尺寸的 `ImageReader` 占位输出。两路输出的配置与串流模式一致，避免 Camera2 为单路/双路会话选择不同的 sensor mode 导致取景范围跳变；占位帧会立即丢弃。
-- **串流模式**：预览 + `MediaCodec` 输入 Surface 两路输出；启动 RTSP 服务并等待编码器产出参数集（H.264: SPS/PPS；H.265: VPS/SPS/PPS）后进入 `STREAMING`。
-- **后台串流**：UI 不可见时释放预览 Surface，仅保留编码器输出，串流不中断；回到前台重建带预览的会话。
-- 进入/退出串流时会重新创建 CaptureSession，重配置期间界面显示 `Starting / Stopping`。
-
-### 预览显示
-
-- Activity 固定竖屏；预览视图按真实相机缓冲尺寸布局，避免 `TextureView` 把视图尺寸写回 SurfaceTexture 导致取流尺寸变化。
-- SurfaceTexture 自带传感器方向旋转；Compose 图层再按预览框/缓冲尺寸做非等比缩放，抵消旋转引入的拉伸，完整显示相机画面（contain，不裁剪）。
-- 对焦坐标按预览框坐标换算回原始缓冲坐标。
-- 串流与预览使用同一分辨率、同一输出数量，并在请求中显式关闭 EIS/OIS，保证 Ready 与 Live 的取景一致。
-
-## 日志与排障
+- Follow app logs:
 
 ```bash
 adb logcat -s REM_CAM_ENGINE VIDEO_ENCODER RTSP_SERVER CLIENT_CONNECTION
 ```
 
-- **Port in use**：更换 RTSP 端口，或关闭占用端口的进程。
-- **No local network address**：连接 Wi-Fi 或开启 USB tethering 后点击 Refresh network。
-- **手动设置导致启动超时**：部分设备的 HAL 会拒绝手动 AE 组合；应用会自动回退到 Auto 并重试一次，顶部显示错误横幅。
-- 检查流信息：
+## Known Limitations
 
-```bash
-ffprobe -v error -rtsp_transport tcp \
-  -show_entries stream=codec_name,width,height,r_frame_rate \
-  -of default=nw=1 rtsp://<手机IP>:8554/camera
-```
-
-## 已知限制
-
-- 界面固定竖屏；横放手机时 RTSP 输出的是传感器原始横向画面，屏幕预览则是该画面的竖屏取景。
-- 串流过程中镜头菜单和设置中的切换入口会禁用（避免重建编码会话）；停止后可切换。
-- 手动模式在部分设备上可能被 HAL 拒绝，会自动回退到自动曝光/对焦。
-- 预览与串流取景一致性依赖设备的 Camera2/HAL 行为；当前实现已在 Pixel 3 XL 上验证。若移植到其他机型出现 FOV 差异，可进一步读取并补偿 SurfaceTexture 变换矩阵。
-- RTSP 服务仅提供 `/camera` 单路视频，编码为 H.264 或 H.265（取决于设置），不含音频；不支持 RTSP over TLS。
-- H.265 需要客户端支持 HEVC（VLC / ffmpeg 通常支持；部分电视和移动端播放器不支持）。
-- Basic 认证凭据保存在应用私有 `SharedPreferences` 中，未额外加密。
-- 预览模式会额外占用一路同尺寸 ImageReader 输出（不编码、不写盘），串流模式下会释放。
+- The RTSP server exposes one video track (`/camera`) with no audio and no RTSP over TLS.
+- Basic-auth credentials are stored in the app-private `SharedPreferences` without additional encryption.
+- Preview and streaming field-of-view matching depends on the Camera2/HAL implementation; results can vary between devices and camera HALs.
+- Preview-only mode uses an extra same-size `ImageReader` output to keep the sensor mode consistent with the streaming session; it is released while streaming.
+- H.265 requires a hardware HEVC encoder and a client that can decode HEVC.
 
 ## License
 
-本项目基于 [Apache License 2.0](LICENSE) 开源。
+Licensed under the [Apache License 2.0](LICENSE).
 
 Copyright 2026 akako
