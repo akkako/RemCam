@@ -30,9 +30,6 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
     private val capabilityReader = CameraCapabilityReader(application)
     private val engine = RemCamEngine.get(application)
     private val capabilitiesByCameraId = mutableMapOf<String, CameraCapabilities>()
-    private val encoderMaxBitrateMbps: Int? by lazy {
-        capabilityReader.readAvcEncoderMaxBitrateMbps()
-    }
 
     private val _uiState = MutableStateFlow(buildInitialUiState())
     val uiState: StateFlow<RemCamUiState> = _uiState.asStateFlow()
@@ -406,6 +403,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
                 resolution = current.selectedResolution,
                 fps = current.selectedFps,
                 bitrate = current.selectedBitrate,
+                codec = current.selectedCodec,
                 port = port,
                 hostAddress = host,
                 authEnabled = current.rtspAuthEnabled,
@@ -495,6 +493,18 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         if (state.isStreaming || state.isBusy) return
         _uiState.update {
             it.copy(selectedBitrate = preset).also(::saveSettings)
+        }
+    }
+
+    fun selectCodec(codec: VideoCodec) {
+        val state = _uiState.value
+        if (state.isStreaming || state.isBusy) return
+        val option = state.availableCodecs.firstOrNull { it.codec == codec } ?: return
+        _uiState.update {
+            it.copy(
+                selectedCodec = codec,
+                encoderMaxBitrateMbps = option.maxBitrateMbps
+            ).also(::saveSettings)
         }
     }
 
@@ -604,6 +614,13 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
             ?: fpsOptions.firstOrNull { it.fps == FpsPreset.FPS_30.fps }
             ?: fpsOptions.first()
         val manualValues = defaultManualValues(capabilities, fps.fps)
+        val codecOptions = capabilityReader.supportedVideoCodecs()
+            .ifEmpty { listOf(VideoCodecOption(VideoCodec.H264, hardware = false)) }
+        val selectedCodec = saved.codec
+            .takeIf { codec -> codecOptions.any { it.codec == codec } }
+            ?: codecOptions.firstOrNull { it.codec == VideoCodec.H264 }?.codec
+            ?: codecOptions.first().codec
+        val codecOption = codecOptions.first { it.codec == selectedCodec }
 
         return RemCamUiState(
             selectedCameraId = cameraId,
@@ -612,9 +629,11 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
             selectedResolution = resolution,
             selectedFps = fps,
             selectedBitrate = saved.bitrate,
+            selectedCodec = selectedCodec,
+            availableCodecs = codecOptions,
             availableResolutions = resolutions,
             availableFpsOptions = fpsOptions,
-            encoderMaxBitrateMbps = encoderMaxBitrateMbps,
+            encoderMaxBitrateMbps = codecOption.maxBitrateMbps,
             manualCapabilities = capabilities.manualCapabilities,
             manualValues = manualValues,
             flashAvailable = capabilities.flashAvailable,
@@ -697,12 +716,16 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         val bitrate = BitratePreset.entries.firstOrNull {
             it.name == preferences.getString(KEY_BITRATE, BitratePreset.MBPS_6.name)
         } ?: BitratePreset.MBPS_6
+        val codec = VideoCodec.entries.firstOrNull {
+            it.name == preferences.getString(KEY_CODEC, VideoCodec.H264.name)
+        } ?: VideoCodec.H264
         val port = preferences.getString(KEY_PORT, "8554").orEmpty().ifBlank { "8554" }
         return SavedSettings(
             cameraId = cameraId,
             resolution = resolution,
             fps = fps,
             bitrate = bitrate,
+            codec = codec,
             port = port,
             authEnabled = preferences.getBoolean(KEY_AUTH_ENABLED, false),
             username = preferences.getString(KEY_AUTH_USERNAME, "").orEmpty(),
@@ -734,6 +757,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
             )
             .putString(KEY_FPS, state.selectedFps.name)
             .putString(KEY_BITRATE, state.selectedBitrate.name)
+            .putString(KEY_CODEC, state.selectedCodec.name)
             .putString(KEY_PORT, state.portInput)
             .putBoolean(KEY_AUTH_ENABLED, state.rtspAuthEnabled)
             .putString(KEY_AUTH_USERNAME, state.rtspUsername)
@@ -821,6 +845,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         val resolution: ResolutionPreset,
         val fps: FpsPreset,
         val bitrate: BitratePreset,
+        val codec: VideoCodec,
         val port: String,
         val authEnabled: Boolean,
         val username: String,
@@ -863,6 +888,7 @@ private const val KEY_CAMERA_ID = "camera_id"
 private const val KEY_RESOLUTION = "resolution"
 private const val KEY_FPS = "fps"
 private const val KEY_BITRATE = "bitrate"
+private const val KEY_CODEC = "video_codec"
 private const val KEY_PORT = "port"
 private const val KEY_AUTH_ENABLED = "rtsp_auth_enabled"
 private const val KEY_AUTH_USERNAME = "rtsp_username"

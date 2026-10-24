@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -40,7 +41,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lens
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Settings
@@ -63,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -94,6 +95,7 @@ import com.remcam.ui.theme.RemCamAccent
 import com.remcam.ui.theme.RemCamAmber
 import com.remcam.ui.theme.RemCamBlack
 import com.remcam.ui.theme.RemCamGreen
+import com.remcam.ui.theme.RemCamOnAccent
 import com.remcam.ui.theme.RemCamRed
 import com.remcam.ui.theme.RemCamText
 import com.remcam.ui.theme.RemCamTextDim
@@ -410,7 +412,7 @@ fun RemCamScreen(viewModel: RemCamViewModel) {
                     TopControlBar(
                         state = state,
                         onToggleTorch = viewModel::toggleTorch,
-                        onSelectCamera = viewModel::selectCamera,
+                        onModeChange = viewModel::setManualMode,
                         onOpenSettings = { showSettings = true }
                     )
                     if (state.errorMessage != null) {
@@ -464,7 +466,7 @@ fun RemCamScreen(viewModel: RemCamViewModel) {
 private fun TopControlBar(
     state: RemCamUiState,
     onToggleTorch: () -> Unit,
-    onSelectCamera: (String) -> Unit,
+    onModeChange: (Boolean) -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val statusText = when {
@@ -490,44 +492,13 @@ private fun TopControlBar(
             .height(60.dp)
             .padding(horizontal = 8.dp)
     ) {
-        Row(
-            modifier = Modifier.align(Alignment.CenterStart),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (state.flashAvailable) {
-                IconButton(
-                    onClick = onToggleTorch,
-                    enabled = state.cameraReady || state.isStreaming
-                ) {
-                    Icon(
-                        imageVector = if (state.torchEnabled) {
-                            Icons.Default.FlashOn
-                        } else {
-                            Icons.Default.FlashOff
-                        },
-                        contentDescription = if (state.torchEnabled) {
-                            stringResource(R.string.torch_off)
-                        } else {
-                            stringResource(R.string.torch_on)
-                        },
-                        tint = when {
-                            !(state.cameraReady || state.isStreaming) ->
-                                Color.White.copy(alpha = 0.35f)
-
-                            state.torchEnabled -> RemCamAccent
-                            else -> Color.White
-                        },
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-            if (state.availableCameras.size > 1) {
-                CameraLensMenu(
-                    state = state,
-                    onSelectCamera = onSelectCamera
-                )
-            }
-        }
+        ModePill(
+            manualMode = state.manualMode,
+            autoEnabled = !state.isBusy,
+            manualEnabled = state.supportsManual && !state.isBusy,
+            onModeChange = onModeChange,
+            modifier = Modifier.align(Alignment.CenterStart)
+        )
 
         Row(
             modifier = Modifier
@@ -558,16 +529,46 @@ private fun TopControlBar(
             )
         }
 
-        IconButton(
-            onClick = onOpenSettings,
-            modifier = Modifier.align(Alignment.CenterEnd)
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                Icons.Default.Settings,
-                contentDescription = stringResource(R.string.settings),
-                tint = Color.White,
-                modifier = Modifier.size(24.dp)
-            )
+            if (state.flashAvailable) {
+                IconButton(
+                    onClick = onToggleTorch,
+                    enabled = state.cameraReady || state.isStreaming
+                ) {
+                    Icon(
+                        imageVector = if (state.torchEnabled) {
+                            Icons.Default.FlashOn
+                        } else {
+                            Icons.Default.FlashOff
+                        },
+                        contentDescription = if (state.torchEnabled) {
+                            stringResource(R.string.torch_off)
+                        } else {
+                            stringResource(R.string.torch_on)
+                        },
+                        tint = when {
+                            !(state.cameraReady || state.isStreaming) ->
+                                Color.White.copy(alpha = 0.35f)
+
+                            state.torchEnabled -> RemCamAccent
+                            else -> Color.White
+                        },
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    Icons.Default.Settings,
+                    contentDescription = stringResource(R.string.settings),
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     }
 }
@@ -579,29 +580,29 @@ private fun CameraLensMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val enabled = !state.isStreaming && !state.isBusy
-    Box {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .alpha(if (enabled) 1f else 0.5f)
+            .clip(CircleShape)
+            .background(Color(0x99000000))
+            .border(
+                1.dp,
+                Color.White.copy(alpha = if (enabled) 0.35f else 0.15f),
+                CircleShape
+            )
+    ) {
         IconButton(
             onClick = { expanded = true },
-            enabled = enabled
+            enabled = enabled,
+            modifier = Modifier.fillMaxSize()
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Default.Lens,
-                    contentDescription = stringResource(R.string.select_camera),
-                    tint = if (enabled) Color.White else Color.White.copy(alpha = 0.35f),
-                    modifier = Modifier.size(22.dp)
-                )
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = if (enabled) {
-                        Color.White.copy(alpha = 0.7f)
-                    } else {
-                        Color.White.copy(alpha = 0.25f)
-                    },
-                    modifier = Modifier.size(14.dp)
-                )
-            }
+            Icon(
+                Icons.Default.Lens,
+                contentDescription = stringResource(R.string.select_camera),
+                tint = if (enabled) Color.White else Color.White.copy(alpha = 0.35f),
+                modifier = Modifier.size(22.dp)
+            )
         }
         DropdownMenu(
             expanded = expanded,
@@ -670,13 +671,6 @@ private fun BottomControlArea(
         }
 
         Column(modifier = Modifier.fillMaxWidth()) {
-            ModeTabs(
-                manualMode = state.manualMode,
-                autoEnabled = !state.isBusy,
-                manualEnabled = state.supportsManual && !state.isBusy,
-                onModeChange = { viewModel.setManualMode(it) }
-            )
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -684,7 +678,17 @@ private fun BottomControlArea(
                     .padding(start = 24.dp, end = 24.dp, top = 6.dp, bottom = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Spacer(Modifier.weight(1f))
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (state.availableCameras.size > 1) {
+                        CameraLensMenu(
+                            state = state,
+                            onSelectCamera = viewModel::selectCamera
+                        )
+                    }
+                }
 
                 CameraShutterButton(
                     streaming = streaming,
@@ -715,73 +719,64 @@ private fun BottomControlArea(
 }
 
 @Composable
-private fun ModeTabs(
+private fun ModePill(
     manualMode: Boolean,
     autoEnabled: Boolean,
     manualEnabled: Boolean,
-    onModeChange: (Boolean) -> Unit
+    onModeChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.Center,
+        modifier = modifier
+            .size(width = 104.dp, height = 34.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color(0xB3000000))
+            .padding(2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(Color(0x99000000))
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ModeTab(
-                label = stringResource(R.string.auto),
-                selected = !manualMode,
-                enabled = autoEnabled,
-                onClick = { onModeChange(false) }
-            )
-            Spacer(Modifier.width(4.dp))
-            ModeTab(
-                label = stringResource(R.string.manual),
-                selected = manualMode,
-                enabled = manualEnabled,
-                onClick = { onModeChange(true) }
-            )
-        }
+        ModePillSegment(
+            label = stringResource(R.string.auto),
+            selected = !manualMode,
+            enabled = autoEnabled,
+            modifier = Modifier.weight(1f),
+            onClick = { onModeChange(false) }
+        )
+        ModePillSegment(
+            label = stringResource(R.string.manual),
+            selected = manualMode,
+            enabled = manualEnabled,
+            modifier = Modifier.weight(1f),
+            onClick = { onModeChange(true) }
+        )
     }
 }
 
 @Composable
-private fun ModeTab(
+private fun ModePillSegment(
     label: String,
     selected: Boolean,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
             .clip(RoundedCornerShape(50))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(if (selected && enabled) RemCamAccent else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.labelLarge,
             color = when {
-                !enabled -> RemCamTextDim.copy(alpha = 0.45f)
-                selected -> RemCamAccent
+                !enabled -> RemCamTextDim.copy(alpha = 0.4f)
+                selected -> RemCamOnAccent
                 else -> RemCamText
             },
-            maxLines = 1
-        )
-        Spacer(Modifier.height(4.dp))
-        Box(
-            modifier = Modifier
-                .size(4.dp)
-                .clip(CircleShape)
-                .background(if (selected && enabled) RemCamAccent else Color.Transparent)
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

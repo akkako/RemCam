@@ -1,18 +1,18 @@
 # RemCam
 
-RemCam 是一个把 Android 手机变成局域网 RTSP 摄像头的应用：使用 Camera2 采集画面，MediaCodec 编码 H.264，在手机本地启动 RTSP/RTP 服务，局域网内的播放器（VLC、ffplay、GStreamer 等）可以直接拉流。
+RemCam 是一个把 Android 手机变成局域网 RTSP 摄像头的应用：使用 Camera2 采集画面，MediaCodec 编码 H.264 或 H.265（设备支持硬件编码时），在手机本地启动 RTSP/RTP 服务，局域网内的播放器（VLC、ffplay、GStreamer 等）可以直接拉流。
 
 ## 功能
 
 - **本地 RTSP 串流**：内置轻量 RTSP 服务器，默认端口 `8554`，流地址为 `rtsp://<手机IP>:8554/camera`。
-- **H.264 编码**：MediaCodec 硬件编码，支持分辨率、帧率、码率选择。
+- **H.264 / H.265 编码**：MediaCodec 硬件编码，支持分辨率、帧率、码率选择；默认 H.264，设备有硬件 HEVC 编码器时可在设置中切换 H.265。
 - **TCP / UDP 客户端**：支持 RTP/AVP/TCP interleaved 和 RTP/AVP UDP，多个客户端可同时连接。
 - **可选 Basic 认证**：设置用户名/密码后，客户端需要认证才能拉流。
 - **后台串流**：前台服务保活；按 Home、锁屏后相机、编码器和 RTSP 服务继续运行。
-- **多镜头选择**：顶部手电筒旁的镜头菜单直接选择 Camera2 相机（主摄、超广角、前摄等），设置页会列出当前相机支持的录制参数。
+- **多镜头选择**：底部快门左侧的镜头菜单直接选择 Camera2 相机（主摄、超广角、前摄等），设置页会列出当前相机支持的录制参数。
 - **相机控制**：手电筒、点击对焦（自动模式）、双指缩放、+/- 变焦。
 - **手动模式**：ISO、曝光时间、手动对焦、白平衡预设；支持实时调整。
-- **相机风格 UI**：竖屏全屏预览、浮层控件、底部 Auto/Manual 模式胶囊与居中快门。
+- **相机风格 UI**：竖屏全屏预览、浮层控件、顶部左侧 Auto/Manual 小胶囊与底部居中快门。
 - **网络地址管理**：列出 Wi-Fi / USB tethering 等本地 IPv4 地址，可刷新、复制 RTSP URL。
 
 ## 环境要求
@@ -79,6 +79,7 @@ rtsp://username:password@192.168.1.10:8554/camera
 - **RTSP port**：默认 `8554`，范围 1–65535。
 - **Resolution**：相机支持的 16:9 分辨率列表，默认 `1280 x 720`。
 - **Frame rate**：按分辨率和相机能力过滤，默认 30 fps。
+- **Video codec**：H.264（默认）或 H.265（仅当设备暴露硬件 HEVC 编码器时出现），切换后下次 Start 生效。
 - **Bitrate**：4–250 Mbps；高于编码器上限时设置页会给出警告。
 - **Basic authentication**：用户名/密码，可选；启用后未认证客户端会收到 401。
 - **Refresh network**：刷新本地 IPv4 地址列表。
@@ -90,8 +91,8 @@ rtsp://username:password@192.168.1.10:8554/camera
 ## UI 说明
 
 - 竖屏锁定，全屏显示相机画面。
-- 顶部：手电筒（有闪光灯时）、镜头选择菜单（多相机时）、状态胶囊（`Ready / Live / Starting / Stopping / Error` + 相机/分辨率）、设置入口。
-- 底部为浮层控件：`Auto / Manual` 紧凑模式胶囊、居中快门、变焦胶囊；相机切换只通过顶部镜头菜单完成。
+- 顶部：左侧 Auto/Manual 小胶囊（与变焦胶囊同尺寸）、中间状态胶囊（`Ready / Live / Starting / Stopping / Error` + 相机/分辨率）、右侧手电筒（有闪光灯时）和设置入口。
+- 底部为浮层控件：左侧镜头菜单、居中快门、右侧变焦胶囊；相机切换只通过底部左侧镜头菜单完成。
 - 开始串流后顶部短暂显示 RTSP URL 横幅，可一键复制。
 - 手动模式会展开圆角手动控制卡片：参数 chip + 滑杆，支持 Reset 和收起。
 
@@ -139,7 +140,7 @@ RemCamViewModel ── SharedPreferences（端口/分辨率/帧率/码率/认证
         ▼
 RemCamEngine（Application 级单例，StateFlow）
         │
-        ├── CameraStreamManager ── Camera2 + MediaCodec(H.264) + 手动/对焦/变焦/手电筒
+        ├── CameraStreamManager ── Camera2 + MediaCodec(H.264/H.265) + 手动/对焦/变焦/手电筒
         └── RtspServer ── RTSP 信令 + RTP 封包（FU-A）+ SDP
         │
 RemCamStreamService（前台服务，保持进程与相机存活）
@@ -148,7 +149,7 @@ RemCamStreamService（前台服务，保持进程与相机存活）
 ### 会话模式
 
 - **预览模式**：相机输出到预览 `TextureView`，同时挂一路同尺寸的 `ImageReader` 占位输出。两路输出的配置与串流模式一致，避免 Camera2 为单路/双路会话选择不同的 sensor mode 导致取景范围跳变；占位帧会立即丢弃。
-- **串流模式**：预览 + `MediaCodec` 输入 Surface 两路输出；启动 RTSP 服务并等待编码器产出 SPS/PPS 后进入 `STREAMING`。
+- **串流模式**：预览 + `MediaCodec` 输入 Surface 两路输出；启动 RTSP 服务并等待编码器产出参数集（H.264: SPS/PPS；H.265: VPS/SPS/PPS）后进入 `STREAMING`。
 - **后台串流**：UI 不可见时释放预览 Surface，仅保留编码器输出，串流不中断；回到前台重建带预览的会话。
 - 进入/退出串流时会重新创建 CaptureSession，重配置期间界面显示 `Starting / Stopping`。
 
@@ -182,7 +183,8 @@ ffprobe -v error -rtsp_transport tcp \
 - 串流过程中镜头菜单和设置中的切换入口会禁用（避免重建编码会话）；停止后可切换。
 - 手动模式在部分设备上可能被 HAL 拒绝，会自动回退到自动曝光/对焦。
 - 预览与串流取景一致性依赖设备的 Camera2/HAL 行为；当前实现已在 Pixel 3 XL 上验证。若移植到其他机型出现 FOV 差异，可进一步读取并补偿 SurfaceTexture 变换矩阵。
-- RTSP 服务仅提供 `/camera` 单路 H.264 视频，不含音频；不支持 RTSP over TLS。
+- RTSP 服务仅提供 `/camera` 单路视频，编码为 H.264 或 H.265（取决于设置），不含音频；不支持 RTSP over TLS。
+- H.265 需要客户端支持 HEVC（VLC / ffmpeg 通常支持；部分电视和移动端播放器不支持）。
 - Basic 认证凭据保存在应用私有 `SharedPreferences` 中，未额外加密。
 - 预览模式会额外占用一路同尺寸 ImageReader 输出（不编码、不写盘），串流模式下会释放。
 

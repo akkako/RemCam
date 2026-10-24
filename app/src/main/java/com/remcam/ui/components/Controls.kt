@@ -135,7 +135,7 @@ fun ZoomControl(
                 .clickable(enabled = canZoom && zoom > 1.01f, onClick = onReset),
             textAlign = TextAlign.Center,
             color = Color.White,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelLarge,
             maxLines = 1
         )
         ZoomStepButton(

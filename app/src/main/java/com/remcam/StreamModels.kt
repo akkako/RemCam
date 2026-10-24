@@ -110,6 +110,28 @@ data class ManualControlValues(
     val awbMode: Int? = null
 )
 
+enum class VideoCodec(
+    val mimeType: String,
+    val sdpName: String,
+    @StringRes val labelRes: Int
+) {
+    H264("video/avc", "H264", R.string.codec_h264),
+    H265("video/hevc", "H265", R.string.codec_h265)
+}
+
+data class VideoCodecOption(
+    val codec: VideoCodec,
+    val hardware: Boolean,
+    val maxBitrateMbps: Int? = null
+)
+
+data class EncodedParameterSets(
+    val codec: VideoCodec,
+    val vps: ByteArray? = null,
+    val sps: ByteArray,
+    val pps: ByteArray
+)
+
 data class CameraOption(
     val id: String,
     val lensFacing: Int,
@@ -128,6 +150,8 @@ data class RemCamUiState(
     val selectedResolution: ResolutionPreset = ResolutionPreset(1280, 720),
     val selectedFps: FpsPreset = FpsPreset.FPS_30,
     val selectedBitrate: BitratePreset = BitratePreset.MBPS_6,
+    val selectedCodec: VideoCodec = VideoCodec.H264,
+    val availableCodecs: List<VideoCodecOption> = emptyList(),
     val availableResolutions: List<ResolutionPreset> = emptyList(),
     val availableFpsOptions: List<FpsPreset> = listOf(FpsPreset.FPS_30),
     val encoderMaxBitrateMbps: Int? = null,
@@ -155,6 +179,8 @@ data class RemCamUiState(
     val isStopping: Boolean get() = streamStatus == StreamStatus.STOPPING
     val isBusy: Boolean get() = isStarting || isStopping
     val hasLocalAddress: Boolean get() = localAddresses.isNotEmpty()
+    val selectedCodecOption: VideoCodecOption?
+        get() = availableCodecs.firstOrNull { it.codec == selectedCodec }
     val supportsManual: Boolean get() = manualCapabilities != null
     val supportsFocus: Boolean get() = manualCapabilities?.supportsFocus == true
     val supportsWhiteBalance: Boolean get() = manualCapabilities?.supportsWhiteBalance == true

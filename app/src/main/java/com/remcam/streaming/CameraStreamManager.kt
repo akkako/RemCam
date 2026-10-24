@@ -27,7 +27,9 @@ import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import com.remcam.BitratePreset
+import com.remcam.EncodedParameterSets
 import com.remcam.R
+import com.remcam.VideoCodec
 import com.remcam.FpsPreset
 import com.remcam.ManualCapabilities
 import com.remcam.ManualControlValues
@@ -435,6 +437,7 @@ class CameraStreamManager(context: Context) {
         resolution: ResolutionPreset,
         fps: FpsPreset,
         bitrate: BitratePreset,
+        codec: VideoCodec,
         port: Int,
         hostAddress: String,
         authEnabled: Boolean,
@@ -502,22 +505,28 @@ class CameraStreamManager(context: Context) {
                     Log.i(
                         TAG_VIDEO_ENCODER,
                         "Preparing encoder for ${activeStreamSize.width}x${activeStreamSize.height} " +
-                            "@ ${activeFps}fps bitrate=${bitrate.bitrate} manual=$manualControlsEnabled"
+                            "@ ${activeFps}fps bitrate=${bitrate.bitrate} codec=${codec.sdpName} manual=$manualControlsEnabled"
                     )
                     prepareEncoder(
+                        codec = codec,
                         width = activeStreamSize.width,
                         height = activeStreamSize.height,
                         fps = activeFps,
                         bitrate = bitrate.bitrate,
-                        onFormatReady = { sps, pps ->
+                        onFormatReady = { sets ->
                             server.updateStreamInfo(
+                                codec = sets.codec,
                                 width = activeStreamSize.width,
                                 height = activeStreamSize.height,
                                 fps = activeFps,
-                                sps = sps,
-                                pps = pps
+                                vps = sets.vps,
+                                sps = sets.sps,
+                                pps = sets.pps
                             )
-                            Log.i(TAG_VIDEO_ENCODER, "Encoder output format ready; SPS/PPS published to RTSP server")
+                            Log.i(
+                                TAG_VIDEO_ENCODER,
+                                "Encoder output format ready; ${sets.codec.sdpName} parameter sets published"
+                            )
                             if (!formatReady.isCompleted) formatReady.complete(Unit)
                         },
                         onEncodedData = { accessUnit, ptsUs, isKeyFrame ->
@@ -1077,35 +1086,60 @@ class CameraStreamManager(context: Context) {
     }
 
     private fun prepareEncoder(
+        codec: VideoCodec,
         width: Int,
         height: Int,
         fps: Int,
         bitrate: Int,
-        onFormatReady: (ByteArray, ByteArray) -> Unit,
+        onFormatReady: (EncodedParameterSets) -> Unit,
         onEncodedData: (ByteArray, Long, Boolean) -> Unit
     ) {
-        val codec = configureEncoderWithFallback(width, height, fps, bitrate)
-        videoSurface = codec.createInputSurface()
-        codec.start()
-        mediaCodec = codec
+        val encoder = configureEncoderWithFallback(codec, width, height, fps, bitrate)
+        videoSurface = encoder.createInputSurface()
+        encoder.start()
+        mediaCodec = encoder
 
         encoderJob = scope.launch {
             val bufferInfo = MediaCodec.BufferInfo()
             try {
                 while (isActive && isStreaming) {
-                    val outputIndex = codec.dequeueOutputBuffer(bufferInfo, 10_000)
+                    val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, 10_000)
                     when {
                         outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                            val newFormat = codec.outputFormat
-                            val sps = newFormat.getByteBuffer("csd-0")
-                                ?.toByteArrayWithoutStartCode()
-                            val pps = newFormat.getByteBuffer("csd-1")
-                                ?.toByteArrayWithoutStartCode()
-                            if (sps != null && pps != null) onFormatReady(sps, pps)
+                            val newFormat = encoder.outputFormat
+                            when (codec) {
+                                VideoCodec.H264 -> {
+                                    val sps = newFormat.getByteBuffer("csd-0")
+                                        ?.toByteArrayWithoutStartCode()
+                                    val pps = newFormat.getByteBuffer("csd-1")
+                                        ?.toByteArrayWithoutStartCode()
+                                    if (sps != null && pps != null) {
+                                        onFormatReady(
+                                            EncodedParameterSets(
+                                                codec = VideoCodec.H264,
+                                                sps = sps,
+                                                pps = pps
+                                            )
+                                        )
+                                    }
+                                }
+
+                                VideoCodec.H265 -> {
+                                    val sets = hevcParameterSets(newFormat)
+                                    if (sets != null) {
+                                        onFormatReady(sets)
+                                    } else {
+                                        Log.e(
+                                            TAG_VIDEO_ENCODER,
+                                            "HEVC output format did not contain VPS/SPS/PPS"
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         outputIndex >= 0 -> {
-                            val outputBuffer = codec.getOutputBuffer(outputIndex)
+                            val outputBuffer = encoder.getOutputBuffer(outputIndex)
                             if (outputBuffer != null && bufferInfo.size > 0) {
                                 outputBuffer.position(bufferInfo.offset)
                                 outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
@@ -1119,7 +1153,7 @@ class CameraStreamManager(context: Context) {
                                     onEncodedData(accessUnit, bufferInfo.presentationTimeUs, isKeyFrame)
                                 }
                             }
-                            codec.releaseOutputBuffer(outputIndex, false)
+                            encoder.releaseOutputBuffer(outputIndex, false)
                         }
                     }
                 }
@@ -1133,69 +1167,133 @@ class CameraStreamManager(context: Context) {
         }
     }
 
+    /**
+     * MediaCodec exposes HEVC parameter sets either as one csd-0 buffer with
+     * VPS/SPS/PPS or as separate csd buffers. Parse both layouts.
+     */
+    private fun hevcParameterSets(format: MediaFormat): EncodedParameterSets? {
+        val buffers = listOf("csd-0", "csd-1", "csd-2").mapNotNull { key ->
+            format.getByteBuffer(key)?.let { buffer ->
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
+                bytes
+            }
+        }
+        if (buffers.isEmpty()) return null
+        val nalUnits = buffers.flatMap { bytes ->
+            val split = splitNalUnits(bytes)
+            if (split.isEmpty() && bytes.size >= 2) listOf(bytes) else split
+        }
+        val vps = nalUnits.firstOrNull { hevcNalType(it) == 32 } ?: return null
+        val sps = nalUnits.firstOrNull { hevcNalType(it) == 33 } ?: return null
+        val pps = nalUnits.firstOrNull { hevcNalType(it) == 34 } ?: return null
+        return EncodedParameterSets(
+            codec = VideoCodec.H265,
+            vps = vps,
+            sps = sps,
+            pps = pps
+        )
+    }
+
+    private fun hevcNalType(nalUnit: ByteArray): Int =
+        if (nalUnit.size >= 2) (nalUnit[0].toInt() ushr 1) and 0x3F else -1
+
     private fun configureEncoderWithFallback(
+        videoCodec: VideoCodec,
         width: Int,
         height: Int,
         fps: Int,
         bitrate: Int
     ): MediaCodec {
-        val attempts = listOf(
-            EncoderConfigAttempt(
-                label = "low-latency-high-profile",
-                optionalConfig = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        setInteger(MediaFormat.KEY_PRIORITY, 0)
-                        setFloat(MediaFormat.KEY_OPERATING_RATE, fps.toFloat())
+        val attempts = if (videoCodec == VideoCodec.H265) {
+            listOf(
+                EncoderConfigAttempt(
+                    label = "low-latency-hevc",
+                    optionalConfig = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            setInteger(MediaFormat.KEY_PRIORITY, 0)
+                            setFloat(MediaFormat.KEY_OPERATING_RATE, fps.toFloat())
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            setInteger(
+                                MediaFormat.KEY_COLOR_RANGE,
+                                MediaFormat.COLOR_RANGE_LIMITED
+                            )
+                        }
                     }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+                ),
+                EncoderConfigAttempt(
+                    label = "compatible-hevc-cbr",
+                    optionalConfig = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            setInteger(MediaFormat.KEY_PRIORITY, 0)
+                        }
                     }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        setInteger(
-                            MediaFormat.KEY_PROFILE,
-                            MediaCodecInfo.CodecProfileLevel.AVCProfileHigh
-                        )
-                        setInteger(MediaFormat.KEY_LEVEL, chooseAvcLevel(width, height, fps))
-                    }
-                }
-            ),
-            EncoderConfigAttempt(
-                label = "low-latency-baseline",
-                optionalConfig = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        setInteger(MediaFormat.KEY_PRIORITY, 0)
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                    }
-                }
-            ),
-            EncoderConfigAttempt(
-                label = "compatible-cbr",
-                optionalConfig = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        setInteger(MediaFormat.KEY_PRIORITY, 0)
-                    }
-                }
-            ),
-            EncoderConfigAttempt(
-                label = "minimal-h264",
-                optionalConfig = { }
+                ),
+                EncoderConfigAttempt(label = "minimal-hevc", optionalConfig = { })
             )
-        )
+        } else {
+            listOf(
+                EncoderConfigAttempt(
+                    label = "low-latency-high-profile",
+                    optionalConfig = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            setInteger(MediaFormat.KEY_PRIORITY, 0)
+                            setFloat(MediaFormat.KEY_OPERATING_RATE, fps.toFloat())
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            setInteger(
+                                MediaFormat.KEY_PROFILE,
+                                MediaCodecInfo.CodecProfileLevel.AVCProfileHigh
+                            )
+                            setInteger(MediaFormat.KEY_LEVEL, chooseAvcLevel(width, height, fps))
+                        }
+                    }
+                ),
+                EncoderConfigAttempt(
+                    label = "low-latency-baseline",
+                    optionalConfig = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            setInteger(MediaFormat.KEY_PRIORITY, 0)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                        }
+                    }
+                ),
+                EncoderConfigAttempt(
+                    label = "compatible-cbr",
+                    optionalConfig = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            setInteger(MediaFormat.KEY_PRIORITY, 0)
+                        }
+                    }
+                ),
+                EncoderConfigAttempt(label = "minimal-h264", optionalConfig = { })
+            )
+        }
 
         var lastError: Exception? = null
         attempts.forEach { attempt ->
-            val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            val encoder = MediaCodec.createEncoderByType(videoCodec.mimeType)
             try {
                 val format = MediaFormat.createVideoFormat(
-                    MediaFormat.MIMETYPE_VIDEO_AVC,
+                    videoCodec.mimeType,
                     width,
                     height
                 ).apply {
@@ -1212,14 +1310,23 @@ class CameraStreamManager(context: Context) {
                     )
                     attempt.optionalConfig(this)
                 }
-                Log.i(TAG_VIDEO_ENCODER, "Trying encoder config: ${attempt.label}")
-                codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                Log.i(TAG_VIDEO_ENCODER, "Encoder configured with: ${attempt.label}")
-                return codec
+                Log.i(
+                    TAG_VIDEO_ENCODER,
+                    "Trying encoder config: ${videoCodec.sdpName} ${attempt.label}"
+                )
+                encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                Log.i(
+                    TAG_VIDEO_ENCODER,
+                    "Encoder configured with: ${videoCodec.sdpName} ${attempt.label}"
+                )
+                return encoder
             } catch (error: Exception) {
                 lastError = error
-                Log.w(TAG_VIDEO_ENCODER, "Encoder config failed: ${attempt.label}: ${error.message}")
-                runCatching { codec.release() }
+                Log.w(
+                    TAG_VIDEO_ENCODER,
+                    "Encoder config failed: ${videoCodec.sdpName} ${attempt.label}: ${error.message}"
+                )
+                runCatching { encoder.release() }
             }
         }
 
@@ -1231,7 +1338,7 @@ class CameraStreamManager(context: Context) {
             ?: return str(R.string.error_failed_start_stream)
         return when {
             message == str(R.string.error_no_encoder_config) ||
-                "No compatible H.264 encoder configuration found" in message ->
+                "No compatible video encoder configuration found" in message ->
                 str(R.string.error_encoder_rejected)
 
             message == str(R.string.error_failed_capture_session) ||

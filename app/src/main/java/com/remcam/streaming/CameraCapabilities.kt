@@ -7,13 +7,17 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.StreamConfigurationMap
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
 import android.media.MediaCodecList
+import android.os.Build
 import android.util.Size
 import com.remcam.CameraOption
 import com.remcam.R
 import com.remcam.FpsPreset
 import com.remcam.ManualCapabilities
 import com.remcam.ResolutionPreset
+import com.remcam.VideoCodec
+import com.remcam.VideoCodecOption
 import com.remcam.manualWhiteBalancePresets
 import java.util.Locale
 
@@ -175,21 +179,55 @@ class CameraCapabilityReader(context: Context) {
         }
     }
 
-    fun readAvcEncoderMaxBitrateMbps(): Int? {
+    /**
+     * Video codecs this device can encode, H.264 first. H.265 is only offered
+     * when a hardware HEVC encoder exists; H.264 falls back to a software
+     * encoder if no hardware AVC encoder is exposed.
+     */
+    fun supportedVideoCodecs(): List<VideoCodecOption> {
         return runCatching {
-            val codecs = MediaCodecList(MediaCodecList.REGULAR_CODECS)
-            val encoder = codecs.codecInfos.firstOrNull { info ->
-                info.isEncoder && info.supportedTypes.any {
-                    it.equals("video/avc", ignoreCase = true)
-                }
-            } ?: return@runCatching null
-            encoder.getCapabilitiesForType("video/avc")
+            val encoders = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+                .filter { it.isEncoder }
+            listOfNotNull(
+                videoCodecOption(VideoCodec.H264, encoders),
+                videoCodecOption(VideoCodec.H265, encoders)
+            )
+        }.getOrElse {
+            listOf(VideoCodecOption(VideoCodec.H264, hardware = false))
+        }
+    }
+
+    private fun videoCodecOption(
+        codec: VideoCodec,
+        encoders: List<MediaCodecInfo>
+    ): VideoCodecOption? {
+        val candidates = encoders.filter { info ->
+            info.supportedTypes.any { it.equals(codec.mimeType, ignoreCase = true) }
+        }
+        if (candidates.isEmpty()) return null
+        val hardware = candidates.filter(::isHardwareAccelerated)
+        if (codec == VideoCodec.H265 && hardware.isEmpty()) return null
+        val best = (hardware.ifEmpty { candidates }).firstOrNull() ?: return null
+        val maxBitrateMbps = runCatching {
+            best.getCapabilitiesForType(codec.mimeType)
                 .videoCapabilities
                 ?.bitrateRange
                 ?.upper
                 ?.div(1_000_000)
         }.getOrNull()
+        return VideoCodecOption(
+            codec = codec,
+            hardware = hardware.isNotEmpty(),
+            maxBitrateMbps = maxBitrateMbps
+        )
     }
+
+    private fun isHardwareAccelerated(info: MediaCodecInfo): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            info.isHardwareAccelerated
+        } else {
+            !info.name.startsWith("OMX.google.") && !info.name.startsWith("c2.android.")
+        }
 
     private fun maxOutputFps(configurationMap: StreamConfigurationMap, size: Size): Double {
         val durationNs = runCatching {

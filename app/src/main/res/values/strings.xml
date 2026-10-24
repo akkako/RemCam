@@ -51,6 +51,11 @@
 
     <!-- Settings: RTSP -->
     <string name="section_rtsp_stream">RTSP STREAM</string>
+    <string name="video_codec">Video codec</string>
+    <string name="codec_h264">H.264 (AVC)</string>
+    <string name="codec_h265">H.265 (HEVC)</string>
+    <string name="codec_hardware">hardware</string>
+    <string name="codec_software">software</string>
     <string name="stream_url_no_auth">Stream URL (no authentication)</string>
     <string name="stream_url_authenticated">Authenticated stream URL</string>
     <string name="no_local_address">No local address</string>
@@ -72,10 +77,10 @@
     <string name="section_camera">CAMERA</string>
     <string name="selected_camera">Selected camera</string>
     <string name="camera_with_id">%1$s · ID %2$s</string>
-    <string name="switch_lenses_hint">Switch lenses from the lens icon next to the flashlight.</string>
+    <string name="switch_lenses_hint">Switch lenses from the lens icon to the left of the shutter.</string>
     <string name="supported_resolutions">Supported resolutions</string>
     <string name="frame_rates_at">Frame rates @ %1$s</string>
-    <string name="encoder_max_bitrate">H.264 encoder max: %1$d Mbps</string>
+    <string name="encoder_max_bitrate">Video encoder max: %1$d Mbps</string>
 
     <!-- Settings: stream -->
     <string name="section_stream_settings">STREAM SETTINGS</string>
@@ -100,7 +105,7 @@
     <!-- Settings: about -->
     <string name="section_about">ABOUT</string>
     <string name="about_version">RemCam %1$s</string>
-    <string name="about_stack">Camera2 · MediaCodec H.264 · local RTSP server</string>
+    <string name="about_stack">Camera2 · MediaCodec H.264 / H.265 · local RTSP server</string>
     <string name="about_stream">Stream path: /camera · Latin-1-safe RTP payload. No cloud relay or external server.</string>
 
     <!-- Manual panel -->
@@ -154,8 +159,8 @@
     <string name="error_camera_error">Camera error: %1$d</string>
     <string name="error_failed_capture_session">Failed to configure camera capture session</string>
     <string name="error_port_in_use">Port %1$d is already in use</string>
-    <string name="error_no_encoder_config">No compatible H.264 encoder configuration found</string>
-    <string name="error_encoder_rejected">This phone rejected the H.264 encoder settings. Try a lower resolution, frame rate, or bitrate.</string>
+    <string name="error_no_encoder_config">No compatible video encoder configuration found</string>
+    <string name="error_encoder_rejected">This phone rejected the video encoder settings. Try a lower resolution, frame rate, or bitrate.</string>
     <string name="error_camera_session_start">Camera session could not start. Close other camera apps and try again.</string>
     <string name="error_preview_not_ready_retry">Preview surface is not ready yet. Try again in a moment.</string>
     <string name="error_camera_disconnected_start">Camera disconnected while starting. Try again.</string>
@@ -166,6 +171,7 @@
     <string name="error_manual_rejected">This camera rejected the manual settings. Switched back to auto.</string>
     <string name="error_camera_request">Camera request failed: %1$s</string>
     <string name="error_encoder_stopped">Video encoder stopped unexpectedly.</string>
+    <string name="error_video_parameter_sets_unavailable">Video encoder parameter sets unavailable</string>
 
     <!-- Notification -->
     <string name="notification_channel_name">Streaming</string>

@@ -12,6 +12,7 @@ import com.remcam.ManualControlValues
 import com.remcam.RemCamStreamService
 import com.remcam.ResolutionPreset
 import com.remcam.StreamStatus
+import com.remcam.VideoCodec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +28,7 @@ data class StreamRequest(
     val resolution: ResolutionPreset,
     val fps: FpsPreset,
     val bitrate: BitratePreset,
+    val codec: VideoCodec,
     val port: Int,
     val hostAddress: String,
     val authEnabled: Boolean,
@@ -220,6 +222,7 @@ class RemCamEngine private constructor(private val appContext: Context) {
                     resolution = request.resolution,
                     fps = request.fps,
                     bitrate = request.bitrate,
+                    codec = request.codec,
                     port = request.port,
                     hostAddress = request.hostAddress,
                     authEnabled = request.authEnabled,

@@ -1,5 +1,7 @@
 package com.remcam.streaming
 
+import com.remcam.VideoCodec
+
 import android.util.Log
 import java.io.BufferedReader
 import java.io.EOFException
@@ -68,14 +70,19 @@ class RtspServer(
     }
 
     fun updateStreamInfo(
+        codec: VideoCodec,
         width: Int,
         height: Int,
         fps: Int,
+        vps: ByteArray?,
         sps: ByteArray,
         pps: ByteArray
     ) {
-        streamInfo = StreamInfo(width, height, fps, sps, pps)
-        Log.i(TAG_VIDEO_ENCODER, "Stream info updated: ${width}x$height @ ${fps}fps")
+        streamInfo = StreamInfo(codec, width, height, fps, vps, sps, pps)
+        Log.i(
+            TAG_VIDEO_ENCODER,
+            "Stream info updated: ${codec.sdpName} ${width}x$height @ ${fps}fps"
+        )
     }
 
     fun dispatchSample(
@@ -92,8 +99,7 @@ class RtspServer(
                     accessUnit = accessUnit,
                     timestamp = timestamp,
                     isKeyFrame = isKeyFrame,
-                    sps = info.sps,
-                    pps = info.pps
+                    info = info
                 )
             }.onFailure { error ->
                 Log.w(TAG_CLIENT_CONNECTION, "Streaming error for ${client.clientLabel}: ${error.message}", error)
@@ -139,6 +145,9 @@ class RtspServer(
 
         @Volatile
         private var playing = false
+
+        @Volatile
+        private var waitingForKeyFrame = true
 
         val clientLabel: String = "${socket.inetAddress.hostAddress}:${socket.port}"
         private val serverAddress: String =
@@ -219,22 +228,33 @@ class RtspServer(
             accessUnit: ByteArray,
             timestamp: Long,
             isKeyFrame: Boolean,
-            sps: ByteArray,
-            pps: ByteArray
+            info: StreamInfo
         ) {
             val transport = transportSession ?: return
+            // Starting a client on a P-frame produces missing-reference
+            // warnings and corrupted first frames. Wait for the next IDR.
+            if (waitingForKeyFrame) {
+                if (!isKeyFrame) return
+                waitingForKeyFrame = false
+            }
             val nalUnits = splitNalUnits(accessUnit)
             if (nalUnits.isEmpty()) return
             if (isKeyFrame) {
-                sendNalUnit(transport, sps, timestamp, marker = false)
-                sendNalUnit(transport, pps, timestamp, marker = false)
+                if (info.codec == VideoCodec.H265) {
+                    info.vps?.let {
+                        sendNalUnit(transport, it, timestamp, marker = false, codec = info.codec)
+                    }
+                }
+                sendNalUnit(transport, info.sps, timestamp, marker = false, codec = info.codec)
+                sendNalUnit(transport, info.pps, timestamp, marker = false, codec = info.codec)
             }
             nalUnits.forEachIndexed { index, nalUnit ->
                 sendNalUnit(
                     transport = transport,
                     nalUnit = nalUnit,
                     timestamp = timestamp,
-                    marker = index == nalUnits.lastIndex
+                    marker = index == nalUnits.lastIndex,
+                    codec = info.codec
                 )
             }
         }
@@ -327,6 +347,7 @@ class RtspServer(
                 respond(request, "454 Session Not Found")
                 return
             }
+            waitingForKeyFrame = true
             playing = true
             respond(
                 request = request,
@@ -346,6 +367,21 @@ class RtspServer(
         }
 
         private fun sendNalUnit(
+            transport: TransportSession,
+            nalUnit: ByteArray,
+            timestamp: Long,
+            marker: Boolean,
+            codec: VideoCodec
+        ) {
+            if (nalUnit.isEmpty()) return
+            if (codec == VideoCodec.H265) {
+                sendH265NalUnit(transport, nalUnit, timestamp, marker)
+            } else {
+                sendH264NalUnit(transport, nalUnit, timestamp, marker)
+            }
+        }
+
+        private fun sendH264NalUnit(
             transport: TransportSession,
             nalUnit: ByteArray,
             timestamp: Long,
@@ -373,6 +409,48 @@ class RtspServer(
                 payload[0] = fuIndicator.toByte()
                 payload[1] = fuHeader.toByte()
                 System.arraycopy(nalUnit, offset, payload, 2, chunkSize)
+                transport.sendRtpPacket(buildRtpPacket(payload, timestamp, marker && end))
+                offset += chunkSize
+            }
+        }
+
+        /**
+         * HEVC RTP payload per RFC 7798: single NAL unit for small NALs,
+         * FU (type 49) with a 2-byte payload header and 1-byte FU header for
+         * larger NALs.
+         */
+        private fun sendH265NalUnit(
+            transport: TransportSession,
+            nalUnit: ByteArray,
+            timestamp: Long,
+            marker: Boolean
+        ) {
+            val payloadLimit = 1_400
+            if (nalUnit.size <= payloadLimit) {
+                transport.sendRtpPacket(buildRtpPacket(nalUnit, timestamp, marker))
+                return
+            }
+            if (nalUnit.size < 4) return
+
+            val nalHeader0 = nalUnit[0].toInt() and 0xFF
+            val nalHeader1 = nalUnit[1].toInt() and 0xFF
+            val nalType = (nalHeader0 ushr 1) and 0x3F
+            val fuIndicator0 = (nalHeader0 and 0x81) or (49 shl 1)
+            val fuIndicator1 = nalHeader1
+            var offset = 2
+            while (offset < nalUnit.size) {
+                val remaining = nalUnit.size - offset
+                val chunkSize = remaining.coerceAtMost(payloadLimit - 3)
+                val start = offset == 2
+                val end = offset + chunkSize >= nalUnit.size
+                val fuHeader = (if (start) 0x80 else 0x00) or
+                    (if (end) 0x40 else 0x00) or
+                    nalType
+                val payload = ByteArray(chunkSize + 3)
+                payload[0] = fuIndicator0.toByte()
+                payload[1] = fuIndicator1.toByte()
+                payload[2] = fuHeader.toByte()
+                System.arraycopy(nalUnit, offset, payload, 3, chunkSize)
                 transport.sendRtpPacket(buildRtpPacket(payload, timestamp, marker && end))
                 offset += chunkSize
             }
@@ -412,16 +490,6 @@ class RtspServer(
         private fun buildSdp(info: StreamInfo): String {
             val spsB64 = Base64.getEncoder().encodeToString(info.sps)
             val ppsB64 = Base64.getEncoder().encodeToString(info.pps)
-            val profileLevelId = info.sps
-                .takeIf { it.size >= 4 }
-                ?.let {
-                    "%02X%02X%02X".format(
-                        Locale.US,
-                        it[1].toInt() and 0xFF,
-                        it[2].toInt() and 0xFF,
-                        it[3].toInt() and 0xFF
-                    )
-                } ?: "42E01F"
 
             return buildString {
                 appendLine("v=0")
@@ -431,8 +499,37 @@ class RtspServer(
                 appendLine("t=0 0")
                 appendLine("a=control:*")
                 appendLine("m=video 0 RTP/AVP 96")
-                appendLine("a=rtpmap:96 H264/90000")
-                appendLine("a=fmtp:96 packetization-mode=1;profile-level-id=$profileLevelId;sprop-parameter-sets=$spsB64,$ppsB64")
+                when (info.codec) {
+                    VideoCodec.H264 -> {
+                        val profileLevelId = info.sps
+                            .takeIf { it.size >= 4 }
+                            ?.let {
+                                "%02X%02X%02X".format(
+                                    Locale.US,
+                                    it[1].toInt() and 0xFF,
+                                    it[2].toInt() and 0xFF,
+                                    it[3].toInt() and 0xFF
+                                )
+                            } ?: "42E01F"
+                        appendLine("a=rtpmap:96 H264/90000")
+                        appendLine(
+                            "a=fmtp:96 packetization-mode=1;" +
+                                "profile-level-id=$profileLevelId;" +
+                                "sprop-parameter-sets=$spsB64,$ppsB64"
+                        )
+                    }
+
+                    VideoCodec.H265 -> {
+                        val vpsB64 = info.vps?.let {
+                            Base64.getEncoder().encodeToString(it)
+                        } ?: ""
+                        appendLine("a=rtpmap:96 H265/90000")
+                        appendLine(
+                            "a=fmtp:96 sprop-vps=$vpsB64;" +
+                                "sprop-sps=$spsB64;sprop-pps=$ppsB64"
+                        )
+                    }
+                }
                 appendLine("a=framerate:${info.fps}")
                 appendLine("a=framesize:96 ${info.width}-${info.height}")
                 appendLine("a=control:trackID=0")
@@ -530,9 +627,11 @@ class RtspServer(
 }
 
 private data class StreamInfo(
+    val codec: VideoCodec,
     val width: Int,
     val height: Int,
     val fps: Int,
+    val vps: ByteArray?,
     val sps: ByteArray,
     val pps: ByteArray
 )
@@ -633,7 +732,7 @@ private fun parseTransport(header: String): RequestedTransport? {
     }
 }
 
-private fun splitNalUnits(buffer: ByteArray): List<ByteArray> {
+internal fun splitNalUnits(buffer: ByteArray): List<ByteArray> {
     if (buffer.isEmpty()) return emptyList()
     val nalUnits = mutableListOf<ByteArray>()
     if (buffer.size >= 4 && buffer[0] == 0.toByte() && buffer[1] == 0.toByte() &&

@@ -61,6 +61,7 @@ import com.remcam.LocalAddress
 import com.remcam.RemCamUiState
 import com.remcam.RemCamViewModel
 import com.remcam.ResolutionPreset
+import com.remcam.VideoCodecOption
 import com.remcam.ui.theme.RemCamAccent
 import com.remcam.ui.theme.RemCamBar
 import com.remcam.ui.theme.RemCamGreen
@@ -83,6 +84,8 @@ fun RemCamSettingsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val editable = !state.isStreaming && !state.isBusy
     val cameraLabel = state.lensLabel.ifBlank { stringResource(R.string.camera_fallback) }
+    val selectedCodecOption = state.availableCodecs
+        .firstOrNull { it.codec == state.selectedCodec }
     val copiedMessage = stringResource(R.string.copied_to_clipboard)
     val port = state.portInput.toIntOrNull()
     val authenticatedUrl = authenticatedRtspUrl(
@@ -360,6 +363,23 @@ fun RemCamSettingsSheet(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    if (selectedCodecOption != null) {
+                        SettingDropdown(
+                            label = stringResource(R.string.video_codec),
+                            selected = selectedCodecOption,
+                            options = state.availableCodecs,
+                            optionLabel = { option ->
+                                val kind = if (option.hardware) {
+                                    stringResource(R.string.codec_hardware)
+                                } else {
+                                    stringResource(R.string.codec_software)
+                                }
+                                "${stringResource(option.codec.labelRes)} · $kind"
+                            },
+                            enabled = editable && state.availableCodecs.size > 1,
+                            onSelected = { viewModel.selectCodec(it.codec) }
+                        )
+                    }
                     SettingDropdown(
                         label = stringResource(R.string.resolution),
                         selected = state.selectedResolution,
@@ -548,7 +568,7 @@ private fun <T> SettingDropdown(
     label: String,
     selected: T,
     options: List<T>,
-    optionLabel: (T) -> String,
+    optionLabel: @Composable (T) -> String,
     enabled: Boolean,
     onSelected: (T) -> Unit
 ) {
