@@ -58,7 +58,7 @@ The app opens in **Auto** mode with the camera preview running. You can configur
 - **Top-center** — status pill: `Ready`, `Live`, `Starting`, `Stopping` or `Error`, followed by the current camera and resolution.
 - **Top-right** — torch (if the camera has a flash) and Settings.
 - **Bottom-left** — Auto/Manual segmented pill.
-- **Bottom-center** — shutter button. Yellow play icon means stopped; red stop icon means live.
+- **Bottom-center** — shutter button. Blue play icon means stopped; red stop icon means live.
 - **Bottom-right** — digital zoom pill: `−`, current zoom, `+`.
 - **Above the bottom bar (Manual mode)** — ISO, Exposure, Focus and White balance controls, plus Reset and Hide.
 

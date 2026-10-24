@@ -1,5 +1,9 @@
 [English](README.md) | **简体中文**
 
+<p align="right">
+  <img src="rem.png" alt="RemCam" width="150">
+</p>
+
 # RemCam
 
 [![Build Release APK](https://github.com/akkako/RemCam/actions/workflows/android-release.yml/badge.svg)](https://github.com/akkako/RemCam/actions/workflows/android-release.yml)
@@ -206,7 +210,8 @@ remcam/
 ├── README.md
 ├── README.zh-CN.md
 ├── USER_GUIDE.md
-└── USER_GUIDE.zh-CN.md
+├── USER_GUIDE.zh-CN.md
+└── rem.png
 ```
 
 ## 故障排查

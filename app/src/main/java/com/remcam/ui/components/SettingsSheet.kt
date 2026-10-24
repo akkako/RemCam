@@ -1,6 +1,7 @@
 package com.remcam.ui.components
 
 import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -64,7 +66,7 @@ import com.remcam.ResolutionPreset
 import com.remcam.VideoCodecOption
 import com.remcam.ui.theme.RemCamAccent
 import com.remcam.ui.theme.RemCamBar
-import com.remcam.ui.theme.RemCamGreen
+import com.remcam.ui.theme.RemCamPositive
 import com.remcam.ui.theme.RemCamSurface
 import com.remcam.ui.theme.RemCamSurfaceHigh
 import com.remcam.ui.theme.RemCamText
@@ -472,26 +474,45 @@ fun RemCamSettingsSheet(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SectionTitle(stringResource(R.string.section_about))
                 SettingsCard {
-                    Text(
-                        text = stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = RemCamText
-                    )
-                    Text(
-                        text = stringResource(R.string.about_author),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = RemCamText
-                    )
-                    Text(
-                        text = stringResource(R.string.about_stack),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = RemCamTextDim
-                    )
-                    Text(
-                        text = stringResource(R.string.about_stream),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = RemCamTextDim
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    R.string.about_version,
+                                    BuildConfig.VERSION_NAME
+                                ),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = RemCamText
+                            )
+                            Text(
+                                text = stringResource(R.string.about_author),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RemCamText
+                            )
+                            Text(
+                                text = stringResource(R.string.about_stack),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RemCamTextDim
+                            )
+                            Text(
+                                text = stringResource(R.string.about_stream),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RemCamTextDim
+                            )
+                        }
+                        Spacer(Modifier.size(12.dp))
+                        Image(
+                            painter = painterResource(R.drawable.rem),
+                            contentDescription = null,
+                            modifier = Modifier.size(96.dp)
+                        )
+                    }
                 }
             }
         }
@@ -552,7 +573,7 @@ private fun CapabilityRow(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        StatusDot(if (supported) RemCamGreen else RemCamTextDim)
+        StatusDot(if (supported) RemCamPositive else RemCamTextDim)
         Spacer(Modifier.size(8.dp))
         Text(
             text = label,
@@ -563,7 +584,7 @@ private fun CapabilityRow(
         Text(
             text = value,
             style = MaterialTheme.typography.labelMedium,
-            color = if (supported) RemCamGreen else RemCamTextDim
+            color = if (supported) RemCamPositive else RemCamTextDim
         )
     }
 }

@@ -94,7 +94,7 @@ import com.remcam.ui.components.ZoomControl
 import com.remcam.ui.theme.RemCamAccent
 import com.remcam.ui.theme.RemCamAmber
 import com.remcam.ui.theme.RemCamBlack
-import com.remcam.ui.theme.RemCamGreen
+import com.remcam.ui.theme.RemCamPositive
 import com.remcam.ui.theme.RemCamOnAccent
 import com.remcam.ui.theme.RemCamRed
 import com.remcam.ui.theme.RemCamText
@@ -479,7 +479,7 @@ private fun TopControlBar(
     }
     val lensLabel = state.lensLabel.ifBlank { stringResource(R.string.camera_fallback) }
     val statusColor = when {
-        state.isStreaming -> RemCamGreen
+        state.isStreaming -> RemCamPositive
         state.isStarting || state.isStopping -> RemCamAmber
         state.errorMessage != null -> RemCamRed
         else -> RemCamTextDim
@@ -791,7 +791,7 @@ private fun LiveUrlBanner(
             .padding(start = 12.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        StatusDot(color = RemCamGreen, size = 7.dp)
+        StatusDot(color = RemCamPositive, size = 7.dp)
         Spacer(Modifier.size(8.dp))
         Text(
             text = url,
