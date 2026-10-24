@@ -35,8 +35,8 @@ android {
         applicationId = "com.remcam"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "2.1.1"
+        versionCode = 5
+        versionName = "2.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
