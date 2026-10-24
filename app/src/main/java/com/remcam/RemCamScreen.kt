@@ -412,7 +412,7 @@ fun RemCamScreen(viewModel: RemCamViewModel) {
                     TopControlBar(
                         state = state,
                         onToggleTorch = viewModel::toggleTorch,
-                        onModeChange = viewModel::setManualMode,
+                        onSelectCamera = viewModel::selectCamera,
                         onOpenSettings = { showSettings = true }
                     )
                     if (state.errorMessage != null) {
@@ -466,7 +466,7 @@ fun RemCamScreen(viewModel: RemCamViewModel) {
 private fun TopControlBar(
     state: RemCamUiState,
     onToggleTorch: () -> Unit,
-    onModeChange: (Boolean) -> Unit,
+    onSelectCamera: (String) -> Unit,
     onOpenSettings: () -> Unit
 ) {
     val statusText = when {
@@ -492,13 +492,13 @@ private fun TopControlBar(
             .height(60.dp)
             .padding(horizontal = 8.dp)
     ) {
-        ModePill(
-            manualMode = state.manualMode,
-            autoEnabled = !state.isBusy,
-            manualEnabled = state.supportsManual && !state.isBusy,
-            onModeChange = onModeChange,
-            modifier = Modifier.align(Alignment.CenterStart)
-        )
+        if (state.availableCameras.size > 1) {
+            CameraLensMenu(
+                state = state,
+                onSelectCamera = onSelectCamera,
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+        }
 
         Row(
             modifier = Modifier
@@ -576,21 +576,15 @@ private fun TopControlBar(
 @Composable
 private fun CameraLensMenu(
     state: RemCamUiState,
-    onSelectCamera: (String) -> Unit
+    onSelectCamera: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
     val enabled = !state.isStreaming && !state.isBusy
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(48.dp)
             .alpha(if (enabled) 1f else 0.5f)
-            .clip(CircleShape)
-            .background(Color(0x99000000))
-            .border(
-                1.dp,
-                Color.White.copy(alpha = if (enabled) 0.35f else 0.15f),
-                CircleShape
-            )
     ) {
         IconButton(
             onClick = { expanded = true },
@@ -680,14 +674,16 @@ private fun BottomControlArea(
             ) {
                 Box(
                     modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.Center
+                    contentAlignment = Alignment.CenterStart
                 ) {
-                    if (state.availableCameras.size > 1) {
-                        CameraLensMenu(
-                            state = state,
-                            onSelectCamera = viewModel::selectCamera
-                        )
-                    }
+                    ModePill(
+                        manualMode = state.manualMode,
+                        autoEnabled = !state.isBusy,
+                        manualEnabled = state.supportsManual &&
+                            (state.cameraReady || state.isStreaming) &&
+                            !state.isBusy,
+                        onModeChange = viewModel::setManualMode
+                    )
                 }
 
                 CameraShutterButton(

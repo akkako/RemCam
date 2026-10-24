@@ -324,6 +324,14 @@ class RemCamEngine private constructor(private val appContext: Context) {
     fun setManualControlsEnabled(enabled: Boolean) =
         cameraManager.setManualControlsEnabled(enabled)
 
+    /** Current Auto exposure/ISO/focus/white-balance, or null before the first frame. */
+    fun snapshotAutoManualValues(): ManualControlValues? =
+        cameraManager.snapshotAutoValues()
+
+    /** Applies the manual flag and values atomically, in a single request. */
+    fun applyManualControls(enabled: Boolean, values: ManualControlValues) =
+        cameraManager.applyManualControls(enabled, values)
+
     fun updateManualControls(values: ManualControlValues) =
         cameraManager.updateManualControls(values)
 

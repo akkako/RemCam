@@ -94,6 +94,7 @@ data class WhiteBalancePreset(
 )
 
 val manualWhiteBalancePresets: List<WhiteBalancePreset> = listOf(
+    WhiteBalancePreset(R.string.white_balance_auto, CaptureRequest.CONTROL_AWB_MODE_AUTO),
     WhiteBalancePreset(R.string.wb_incandescent, CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT),
     WhiteBalancePreset(R.string.wb_warm_fluorescent, CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT),
     WhiteBalancePreset(R.string.wb_fluorescent, CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT),

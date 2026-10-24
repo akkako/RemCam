@@ -13,7 +13,6 @@ import java.net.Inet4Address
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
-import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
@@ -85,24 +84,37 @@ class RtspServer(
         )
     }
 
+    /**
+     * @param accessUnitLength valid bytes in [accessUnit]. The same buffer is
+     * reused by the encoder for every frame, so it must not be retained.
+     */
     fun dispatchSample(
         accessUnit: ByteArray,
+        accessUnitLength: Int,
         presentationTimeUs: Long,
         isKeyFrame: Boolean
     ) {
         val info = streamInfo ?: return
         val timestamp = ((presentationTimeUs * 90L) / 1000L).coerceAtLeast(0L)
-        clients.forEach { client ->
-            if (!client.isReadyToStream()) return@forEach
-            runCatching {
+        // Iterate backwards so removing a failed client does not shift the
+        // indices of clients that still need this frame.
+        for (index in clients.lastIndex downTo 0) {
+            val client = clients[index]
+            if (!client.isReadyToStream()) continue
+            try {
                 client.sendAccessUnit(
                     accessUnit = accessUnit,
+                    accessUnitLength = accessUnitLength,
                     timestamp = timestamp,
                     isKeyFrame = isKeyFrame,
                     info = info
                 )
-            }.onFailure { error ->
-                Log.w(TAG_CLIENT_CONNECTION, "Streaming error for ${client.clientLabel}: ${error.message}", error)
+            } catch (error: Exception) {
+                Log.w(
+                    TAG_CLIENT_CONNECTION,
+                    "Streaming error for ${client.clientLabel}: ${error.message}",
+                    error
+                )
                 client.close()
                 clients.remove(client)
             }
@@ -138,7 +150,13 @@ class RtspServer(
         private val ssrc = Random.nextInt().toLong() and 0xffffffffL
         private var cSeq: String = "1"
         private var sequenceNumber = Random.nextInt(0, 65_535)
+
+        @Volatile
         private var transportSession: TransportSession? = null
+
+        // Reused per frame by the single encoder thread that dispatches RTP.
+        private val rtpHeader = ByteArray(RTP_HEADER_SIZE)
+        private val fuPrefix = ByteArray(3)
 
         @Volatile
         private var closed = false
@@ -155,7 +173,7 @@ class RtspServer(
 
         fun handleRequests() {
             socket.tcpNoDelay = true
-            socket.sendBufferSize = 64 * 1024
+            runCatching { socket.sendBufferSize = 512 * 1024 }
             socket.soTimeout = 0
             try {
                 while (running.get() && !socket.isClosed && !closed) {
@@ -226,6 +244,7 @@ class RtspServer(
 
         fun sendAccessUnit(
             accessUnit: ByteArray,
+            accessUnitLength: Int,
             timestamp: Long,
             isKeyFrame: Boolean,
             info: StreamInfo
@@ -237,25 +256,182 @@ class RtspServer(
                 if (!isKeyFrame) return
                 waitingForKeyFrame = false
             }
-            val nalUnits = splitNalUnits(accessUnit)
-            if (nalUnits.isEmpty()) return
+            val nalCount = countNalUnits(accessUnit, accessUnitLength)
+            if (nalCount == 0) return
+
+            // All packets of one access unit are appended to the transport
+            // buffer and flushed with a single socket write.
+            transport.beginAccessUnit()
             if (isKeyFrame) {
                 if (info.codec == VideoCodec.H265) {
                     info.vps?.let {
-                        sendNalUnit(transport, it, timestamp, marker = false, codec = info.codec)
+                        sendSingleNal(transport, it, 0, it.size, timestamp, marker = false)
                     }
                 }
-                sendNalUnit(transport, info.sps, timestamp, marker = false, codec = info.codec)
-                sendNalUnit(transport, info.pps, timestamp, marker = false, codec = info.codec)
+                sendSingleNal(transport, info.sps, 0, info.sps.size, timestamp, marker = false)
+                sendSingleNal(transport, info.pps, 0, info.pps.size, timestamp, marker = false)
             }
-            nalUnits.forEachIndexed { index, nalUnit ->
+            var sent = 0
+            forEachNalUnit(accessUnit, accessUnitLength) { offset, size ->
+                sent++
                 sendNalUnit(
                     transport = transport,
-                    nalUnit = nalUnit,
+                    source = accessUnit,
+                    offset = offset,
+                    length = size,
                     timestamp = timestamp,
-                    marker = index == nalUnits.lastIndex,
+                    marker = sent == nalCount,
                     codec = info.codec
                 )
+            }
+            transport.endAccessUnit()
+        }
+
+        private fun sendNalUnit(
+            transport: TransportSession,
+            source: ByteArray,
+            offset: Int,
+            length: Int,
+            timestamp: Long,
+            marker: Boolean,
+            codec: VideoCodec
+        ) {
+            if (length <= 0) return
+            if (codec == VideoCodec.H265) {
+                sendH265NalUnit(transport, source, offset, length, timestamp, marker)
+            } else {
+                sendH264NalUnit(transport, source, offset, length, timestamp, marker)
+            }
+        }
+
+        private fun sendH264NalUnit(
+            transport: TransportSession,
+            source: ByteArray,
+            offset: Int,
+            length: Int,
+            timestamp: Long,
+            marker: Boolean
+        ) {
+            if (length <= RTP_PAYLOAD_LIMIT) {
+                sendSingleNal(transport, source, offset, length, timestamp, marker)
+                return
+            }
+
+            val nalHeader = source[offset].toInt() and 0xFF
+            val fuIndicator = (nalHeader and 0xE0) or 28
+            val nalType = nalHeader and 0x1F
+            val end = offset + length
+            var position = offset + 1
+            var first = true
+            while (position < end) {
+                val chunkSize = (end - position).coerceAtMost(RTP_PAYLOAD_LIMIT - 2)
+                val last = position + chunkSize >= end
+                fuPrefix[0] = fuIndicator.toByte()
+                fuPrefix[1] = ((if (first) 0x80 else 0x00) or
+                    (if (last) 0x40 else 0x00) or
+                    nalType).toByte()
+                buildRtpHeader(timestamp, marker && last)
+                transport.sendRtp(
+                    header = rtpHeader,
+                    prefix = fuPrefix,
+                    prefixLength = 2,
+                    payload = source,
+                    payloadOffset = position,
+                    payloadLength = chunkSize
+                )
+                position += chunkSize
+                first = false
+            }
+        }
+
+        /**
+         * HEVC RTP payload per RFC 7798: single NAL unit for small NALs,
+         * FU (type 49) with a 2-byte payload header and 1-byte FU header for
+         * larger NALs.
+         */
+        private fun sendH265NalUnit(
+            transport: TransportSession,
+            source: ByteArray,
+            offset: Int,
+            length: Int,
+            timestamp: Long,
+            marker: Boolean
+        ) {
+            if (length <= RTP_PAYLOAD_LIMIT) {
+                sendSingleNal(transport, source, offset, length, timestamp, marker)
+                return
+            }
+            if (length < 4) return
+
+            val nalHeader0 = source[offset].toInt() and 0xFF
+            val nalHeader1 = source[offset + 1].toInt() and 0xFF
+            val nalType = (nalHeader0 ushr 1) and 0x3F
+            val fuIndicator0 = (nalHeader0 and 0x81) or (49 shl 1)
+            fuPrefix[0] = fuIndicator0.toByte()
+            fuPrefix[1] = nalHeader1.toByte()
+            val end = offset + length
+            var position = offset + 2
+            var first = true
+            while (position < end) {
+                val chunkSize = (end - position).coerceAtMost(RTP_PAYLOAD_LIMIT - 3)
+                val last = position + chunkSize >= end
+                fuPrefix[2] = ((if (first) 0x80 else 0x00) or
+                    (if (last) 0x40 else 0x00) or
+                    nalType).toByte()
+                buildRtpHeader(timestamp, marker && last)
+                transport.sendRtp(
+                    header = rtpHeader,
+                    prefix = fuPrefix,
+                    prefixLength = 3,
+                    payload = source,
+                    payloadOffset = position,
+                    payloadLength = chunkSize
+                )
+                position += chunkSize
+                first = false
+            }
+        }
+
+        private fun sendSingleNal(
+            transport: TransportSession,
+            payload: ByteArray,
+            payloadOffset: Int,
+            payloadLength: Int,
+            timestamp: Long,
+            marker: Boolean
+        ) {
+            if (payloadLength <= 0) return
+            buildRtpHeader(timestamp, marker)
+            transport.sendRtp(
+                header = rtpHeader,
+                prefix = null,
+                prefixLength = 0,
+                payload = payload,
+                payloadOffset = payloadOffset,
+                payloadLength = payloadLength
+            )
+        }
+
+        private fun buildRtpHeader(timestamp: Long, marker: Boolean) {
+            rtpHeader[0] = 0x80.toByte()
+            rtpHeader[1] = ((if (marker) 0x80 else 0x00) or RTP_PAYLOAD_TYPE).toByte()
+            rtpHeader[2] = (sequenceNumber shr 8).toByte()
+            rtpHeader[3] = sequenceNumber.toByte()
+            sequenceNumber = (sequenceNumber + 1) and 0xFFFF
+            rtpHeader[4] = (timestamp shr 24).toByte()
+            rtpHeader[5] = (timestamp shr 16).toByte()
+            rtpHeader[6] = (timestamp shr 8).toByte()
+            rtpHeader[7] = timestamp.toByte()
+            rtpHeader[8] = (ssrc shr 24).toByte()
+            rtpHeader[9] = (ssrc shr 16).toByte()
+            rtpHeader[10] = (ssrc shr 8).toByte()
+            rtpHeader[11] = ssrc.toByte()
+        }
+
+        private fun sendInterleavedData(data: ByteArray, length: Int) {
+            synchronized(outputLock) {
+                output.write(data, 0, length)
+                output.flush()
             }
         }
 
@@ -307,7 +483,7 @@ class RtspServer(
                     existing ?: TcpTransportSession(
                         rtpChannel = parsed.rtpChannel ?: 0,
                         rtcpChannel = parsed.rtcpChannel ?: 1,
-                        sender = ::sendInterleavedPacket
+                        sender = ::sendInterleavedData
                     )
                 }
 
@@ -364,127 +540,6 @@ class RtspServer(
                 if (transportSession != null) add("Session: $sessionId")
             }
             respond(request, status, headers)
-        }
-
-        private fun sendNalUnit(
-            transport: TransportSession,
-            nalUnit: ByteArray,
-            timestamp: Long,
-            marker: Boolean,
-            codec: VideoCodec
-        ) {
-            if (nalUnit.isEmpty()) return
-            if (codec == VideoCodec.H265) {
-                sendH265NalUnit(transport, nalUnit, timestamp, marker)
-            } else {
-                sendH264NalUnit(transport, nalUnit, timestamp, marker)
-            }
-        }
-
-        private fun sendH264NalUnit(
-            transport: TransportSession,
-            nalUnit: ByteArray,
-            timestamp: Long,
-            marker: Boolean
-        ) {
-            val payloadLimit = 1_400
-            if (nalUnit.size <= payloadLimit) {
-                transport.sendRtpPacket(buildRtpPacket(nalUnit, timestamp, marker))
-                return
-            }
-
-            val nalHeader = nalUnit[0].toInt() and 0xFF
-            val fuIndicator = (nalHeader and 0xE0) or 28
-            val nalType = nalHeader and 0x1F
-            var offset = 1
-            while (offset < nalUnit.size) {
-                val remaining = nalUnit.size - offset
-                val chunkSize = remaining.coerceAtMost(payloadLimit - 2)
-                val start = offset == 1
-                val end = offset + chunkSize >= nalUnit.size
-                val fuHeader = (if (start) 0x80 else 0x00) or
-                    (if (end) 0x40 else 0x00) or
-                    nalType
-                val payload = ByteArray(chunkSize + 2)
-                payload[0] = fuIndicator.toByte()
-                payload[1] = fuHeader.toByte()
-                System.arraycopy(nalUnit, offset, payload, 2, chunkSize)
-                transport.sendRtpPacket(buildRtpPacket(payload, timestamp, marker && end))
-                offset += chunkSize
-            }
-        }
-
-        /**
-         * HEVC RTP payload per RFC 7798: single NAL unit for small NALs,
-         * FU (type 49) with a 2-byte payload header and 1-byte FU header for
-         * larger NALs.
-         */
-        private fun sendH265NalUnit(
-            transport: TransportSession,
-            nalUnit: ByteArray,
-            timestamp: Long,
-            marker: Boolean
-        ) {
-            val payloadLimit = 1_400
-            if (nalUnit.size <= payloadLimit) {
-                transport.sendRtpPacket(buildRtpPacket(nalUnit, timestamp, marker))
-                return
-            }
-            if (nalUnit.size < 4) return
-
-            val nalHeader0 = nalUnit[0].toInt() and 0xFF
-            val nalHeader1 = nalUnit[1].toInt() and 0xFF
-            val nalType = (nalHeader0 ushr 1) and 0x3F
-            val fuIndicator0 = (nalHeader0 and 0x81) or (49 shl 1)
-            val fuIndicator1 = nalHeader1
-            var offset = 2
-            while (offset < nalUnit.size) {
-                val remaining = nalUnit.size - offset
-                val chunkSize = remaining.coerceAtMost(payloadLimit - 3)
-                val start = offset == 2
-                val end = offset + chunkSize >= nalUnit.size
-                val fuHeader = (if (start) 0x80 else 0x00) or
-                    (if (end) 0x40 else 0x00) or
-                    nalType
-                val payload = ByteArray(chunkSize + 3)
-                payload[0] = fuIndicator0.toByte()
-                payload[1] = fuIndicator1.toByte()
-                payload[2] = fuHeader.toByte()
-                System.arraycopy(nalUnit, offset, payload, 3, chunkSize)
-                transport.sendRtpPacket(buildRtpPacket(payload, timestamp, marker && end))
-                offset += chunkSize
-            }
-        }
-
-        private fun buildRtpPacket(payload: ByteArray, timestamp: Long, marker: Boolean): ByteArray {
-            val packet = ByteArray(12 + payload.size)
-            packet[0] = 0x80.toByte()
-            packet[1] = ((if (marker) 0x80 else 0x00) or 96).toByte()
-            packet[2] = (sequenceNumber shr 8).toByte()
-            packet[3] = sequenceNumber.toByte()
-            sequenceNumber = (sequenceNumber + 1) and 0xFFFF
-            packet[4] = (timestamp shr 24).toByte()
-            packet[5] = (timestamp shr 16).toByte()
-            packet[6] = (timestamp shr 8).toByte()
-            packet[7] = timestamp.toByte()
-            packet[8] = (ssrc shr 24).toByte()
-            packet[9] = (ssrc shr 16).toByte()
-            packet[10] = (ssrc shr 8).toByte()
-            packet[11] = ssrc.toByte()
-            System.arraycopy(payload, 0, packet, 12, payload.size)
-            return packet
-        }
-
-        private fun sendInterleavedPacket(channel: Int, packet: ByteArray) {
-            synchronized(outputLock) {
-                output.write('$'.code)
-                output.write(channel)
-                val length = packet.size
-                output.write((length shr 8) and 0xFF)
-                output.write(length and 0xFF)
-                output.write(packet)
-                output.flush()
-            }
         }
 
         private fun buildSdp(info: StreamInfo): String {
@@ -659,22 +714,79 @@ private data class RequestedTransport(
 private sealed interface TransportSession {
     val description: String
     fun transportHeader(): String
-    fun sendRtpPacket(packet: ByteArray)
+    fun beginAccessUnit() = Unit
+    fun sendRtp(
+        header: ByteArray,
+        prefix: ByteArray?,
+        prefixLength: Int,
+        payload: ByteArray,
+        payloadOffset: Int,
+        payloadLength: Int
+    )
+    fun endAccessUnit() = Unit
     fun close()
 }
 
 private class TcpTransportSession(
     private val rtpChannel: Int,
     private val rtcpChannel: Int,
-    private val sender: (Int, ByteArray) -> Unit
+    private val sender: (ByteArray, Int) -> Unit
 ) : TransportSession {
     override val description: String = "tcp(interleaved=$rtpChannel-$rtcpChannel)"
+
+    /**
+     * Interleaved framing for a complete access unit is assembled here and
+     * handed to the socket in one write, which avoids a flush per RTP packet.
+     */
+    private var frameBuffer = ByteArray(64 * 1024)
+    private var frameLength = 0
 
     override fun transportHeader(): String =
         "Transport: RTP/AVP/TCP;unicast;interleaved=$rtpChannel-$rtcpChannel"
 
-    override fun sendRtpPacket(packet: ByteArray) {
-        sender(rtpChannel, packet)
+    override fun beginAccessUnit() {
+        frameLength = 0
+    }
+
+    override fun sendRtp(
+        header: ByteArray,
+        prefix: ByteArray?,
+        prefixLength: Int,
+        payload: ByteArray,
+        payloadOffset: Int,
+        payloadLength: Int
+    ) {
+        val packetLength = RTP_HEADER_SIZE + prefixLength + payloadLength
+        require(packetLength <= 0xFFFF) { "RTP packet too large: $packetLength" }
+        ensureCapacity(frameLength + 5 + packetLength)
+
+        frameBuffer[frameLength++] = '$'.code.toByte()
+        frameBuffer[frameLength++] = rtpChannel.toByte()
+        frameBuffer[frameLength++] = ((packetLength shr 8) and 0xFF).toByte()
+        frameBuffer[frameLength++] = (packetLength and 0xFF).toByte()
+        System.arraycopy(header, 0, frameBuffer, frameLength, RTP_HEADER_SIZE)
+        frameLength += RTP_HEADER_SIZE
+        if (prefix != null && prefixLength > 0) {
+            System.arraycopy(prefix, 0, frameBuffer, frameLength, prefixLength)
+            frameLength += prefixLength
+        }
+        System.arraycopy(payload, payloadOffset, frameBuffer, frameLength, payloadLength)
+        frameLength += payloadLength
+    }
+
+    override fun endAccessUnit() {
+        if (frameLength == 0) return
+        val data = frameBuffer
+        val length = frameLength
+        frameLength = 0
+        sender(data, length)
+    }
+
+    private fun ensureCapacity(required: Int) {
+        if (required <= frameBuffer.size) return
+        var newSize = frameBuffer.size
+        while (newSize < required) newSize = newSize shl 1
+        frameBuffer = frameBuffer.copyOf(newSize)
     }
 
     override fun close() = Unit
@@ -685,11 +797,14 @@ private class UdpTransportSession(
     val clientRtpPort: Int,
     val clientRtcpPort: Int
 ) : TransportSession {
-    private val rtpSocket = DatagramSocket()
+    private val rtpSocket = DatagramSocket().apply {
+        runCatching { sendBufferSize = 512 * 1024 }
+    }
     private val rtcpSocket = DatagramSocket()
     private val address = java.net.InetAddress.getByName(clientAddress)
     private val serverRtpPort = rtpSocket.localPort
     private val serverRtcpPort = rtcpSocket.localPort
+    private var packetBuffer = ByteArray(RTP_HEADER_SIZE + RTP_PAYLOAD_LIMIT)
 
     override val description: String =
         "udp(client=$clientRtpPort-$clientRtcpPort server=$serverRtpPort-$serverRtcpPort)"
@@ -697,8 +812,24 @@ private class UdpTransportSession(
     override fun transportHeader(): String =
         "Transport: RTP/AVP;unicast;client_port=$clientRtpPort-$clientRtcpPort;server_port=$serverRtpPort-$serverRtcpPort"
 
-    override fun sendRtpPacket(packet: ByteArray) {
-        rtpSocket.send(DatagramPacket(packet, packet.size, address, clientRtpPort))
+    override fun sendRtp(
+        header: ByteArray,
+        prefix: ByteArray?,
+        prefixLength: Int,
+        payload: ByteArray,
+        payloadOffset: Int,
+        payloadLength: Int
+    ) {
+        val packetLength = RTP_HEADER_SIZE + prefixLength + payloadLength
+        if (packetBuffer.size < packetLength) packetBuffer = ByteArray(packetLength)
+        System.arraycopy(header, 0, packetBuffer, 0, RTP_HEADER_SIZE)
+        var offset = RTP_HEADER_SIZE
+        if (prefix != null && prefixLength > 0) {
+            System.arraycopy(prefix, 0, packetBuffer, offset, prefixLength)
+            offset += prefixLength
+        }
+        System.arraycopy(payload, payloadOffset, packetBuffer, offset, payloadLength)
+        rtpSocket.send(DatagramPacket(packetBuffer, packetLength, address, clientRtpPort))
     }
 
     override fun close() {
@@ -734,41 +865,65 @@ private fun parseTransport(header: String): RequestedTransport? {
 
 internal fun splitNalUnits(buffer: ByteArray): List<ByteArray> {
     if (buffer.isEmpty()) return emptyList()
-    val nalUnits = mutableListOf<ByteArray>()
-    if (buffer.size >= 4 && buffer[0] == 0.toByte() && buffer[1] == 0.toByte() &&
-        ((buffer[2] == 0.toByte() && buffer[3] == 1.toByte()) || buffer[2] == 1.toByte())
-    ) {
-        var offset = findStartCode(buffer, 0)
-        while (offset >= 0 && offset < buffer.size) {
-            val startCodeLength = if (buffer[offset + 2] == 1.toByte()) 3 else 4
-            val nalStart = offset + startCodeLength
-            val nextOffset = findStartCode(buffer, nalStart)
-            val nalEnd = if (nextOffset == -1) buffer.size else nextOffset
-            if (nalStart < nalEnd) {
-                nalUnits += buffer.copyOfRange(nalStart, nalEnd)
-            }
-            offset = nextOffset
-        }
-        return nalUnits
-    }
-
-    val wrapped = ByteBuffer.wrap(buffer)
-    while (wrapped.remaining() > 4) {
-        val length = wrapped.int
-        if (length <= 0 || length > wrapped.remaining()) break
-        val nalUnit = ByteArray(length)
-        wrapped.get(nalUnit)
-        nalUnits += nalUnit
+    val nalUnits = ArrayList<ByteArray>(4)
+    forEachNalUnit(buffer, buffer.size) { offset, size ->
+        nalUnits += buffer.copyOfRange(offset, offset + size)
     }
     return nalUnits
 }
 
-private fun findStartCode(buffer: ByteArray, offset: Int): Int {
+private fun countNalUnits(buffer: ByteArray, length: Int): Int {
+    var count = 0
+    forEachNalUnit(buffer, length) { _, _ -> count++ }
+    return count
+}
+
+/**
+ * Iterates NAL units without copying them. Supports both Annex-B start codes
+ * and the 4-byte length-prefixed layout produced by MediaCodec.
+ */
+private inline fun forEachNalUnit(
+    buffer: ByteArray,
+    length: Int,
+    action: (offset: Int, size: Int) -> Unit
+) {
+    if (length <= 0) return
+    val annexB = length >= 4 &&
+        buffer[0] == 0.toByte() && buffer[1] == 0.toByte() &&
+        ((buffer[2] == 0.toByte() && buffer[3] == 1.toByte()) || buffer[2] == 1.toByte())
+    if (annexB) {
+        var startCode = findStartCode(buffer, 0, length)
+        while (startCode >= 0) {
+            val startCodeLength = if (buffer[startCode + 2] == 1.toByte()) 3 else 4
+            val nalStart = startCode + startCodeLength
+            val nextStartCode = findStartCode(buffer, nalStart, length)
+            val nalEnd = if (nextStartCode < 0) length else nextStartCode
+            if (nalStart < nalEnd) action(nalStart, nalEnd - nalStart)
+            startCode = nextStartCode
+        }
+        return
+    }
+
+    var offset = 0
+    while (offset + 4 <= length) {
+        val nalLength =
+            ((buffer[offset].toInt() and 0xFF) shl 24) or
+                ((buffer[offset + 1].toInt() and 0xFF) shl 16) or
+                ((buffer[offset + 2].toInt() and 0xFF) shl 8) or
+                (buffer[offset + 3].toInt() and 0xFF)
+        offset += 4
+        if (nalLength <= 0 || nalLength > length - offset) break
+        action(offset, nalLength)
+        offset += nalLength
+    }
+}
+
+private fun findStartCode(buffer: ByteArray, offset: Int, length: Int): Int {
     var index = offset
-    while (index + 3 < buffer.size) {
+    while (index + 3 < length) {
         if (buffer[index] == 0.toByte() && buffer[index + 1] == 0.toByte()) {
             if (buffer[index + 2] == 1.toByte()) return index
-            if (index + 3 < buffer.size && buffer[index + 2] == 0.toByte() && buffer[index + 3] == 1.toByte()) {
+            if (buffer[index + 2] == 0.toByte() && buffer[index + 3] == 1.toByte()) {
                 return index
             }
         }
@@ -777,6 +932,9 @@ private fun findStartCode(buffer: ByteArray, offset: Int): Int {
     return -1
 }
 
+private const val RTP_HEADER_SIZE = 12
+private const val RTP_PAYLOAD_TYPE = 96
+private const val RTP_PAYLOAD_LIMIT = 1_400
 private const val TAG_RTSP_SERVER = "RTSP_SERVER"
 private const val TAG_VIDEO_ENCODER = "VIDEO_ENCODER"
 private const val TAG_CLIENT_CONNECTION = "CLIENT_CONNECTION"

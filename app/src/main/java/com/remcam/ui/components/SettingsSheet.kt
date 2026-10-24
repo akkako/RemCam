@@ -478,6 +478,11 @@ fun RemCamSettingsSheet(
                         color = RemCamText
                     )
                     Text(
+                        text = stringResource(R.string.about_author),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RemCamText
+                    )
+                    Text(
                         text = stringResource(R.string.about_stack),
                         style = MaterialTheme.typography.bodySmall,
                         color = RemCamTextDim

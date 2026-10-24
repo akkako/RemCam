@@ -11,6 +11,8 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.StreamConfigurationMap
 import android.media.MediaCodec
@@ -165,6 +167,14 @@ class CameraStreamManager(context: Context) {
     @Volatile
     private var manualValues = ManualControlValues()
 
+    /**
+     * Latest sensor values chosen by auto exposure/auto focus while the camera
+     * is in Auto mode. Switching to Manual starts from this snapshot so the
+     * first manual frame keeps the same brightness, focus and white balance.
+     */
+    @Volatile
+    private var latestAutoSnapshot: AutoCaptureSnapshot? = null
+
     @Volatile
     private var flashAvailable = false
 
@@ -194,6 +204,40 @@ class CameraStreamManager(context: Context) {
     private var maxAeRegions = 0
 
     private val submitRunnable = Runnable { submitRepeatingRequestNow(allowFallback = true) }
+
+    private val captureResultCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(
+            session: CameraCaptureSession,
+            request: CaptureRequest,
+            result: TotalCaptureResult
+        ) {
+            if (manualControlsEnabled) return
+            val exposureNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+                ?.takeIf { it > 0 } ?: return
+            val iso = result.get(CaptureResult.SENSOR_SENSITIVITY)
+                ?.takeIf { it > 0 } ?: return
+            val previous = latestAutoSnapshot
+            // Some HALs report -1 while AF is idle. Keep the last valid lens
+            // position instead of clamping it to infinity.
+            val reportedFocus = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                ?.takeIf { it.isFinite() && it >= 0f }
+            val focusDistance = reportedFocus ?: previous?.focusDistanceDiopters
+            val awbMode = result.get(CaptureResult.CONTROL_AWB_MODE)
+            if (previous == null ||
+                previous.exposureTimeNs != exposureNs ||
+                previous.iso != iso ||
+                previous.focusDistanceDiopters != focusDistance ||
+                previous.awbMode != awbMode
+            ) {
+                latestAutoSnapshot = AutoCaptureSnapshot(
+                    exposureTimeNs = exposureNs,
+                    iso = iso,
+                    focusDistanceDiopters = focusDistance,
+                    awbMode = awbMode
+                )
+            }
+        }
+    }
 
     fun attachPreview(view: TextureView) {
         if (textureView === view) {
@@ -341,6 +385,52 @@ class CameraStreamManager(context: Context) {
     }
 
     /**
+     * Snapshot of the values Auto is currently using, clamped to the manual
+     * capabilities. Null when no preview/capture result exists yet.
+     */
+    fun snapshotAutoValues(): ManualControlValues? {
+        val capabilities = manualCapabilities ?: return null
+        val snapshot = latestAutoSnapshot ?: return null
+        val exposureMax = manualExposureMaxNs(
+            sensorMaxNs = capabilities.exposureTimeRangeNs.last,
+            fps = activeFps
+        ).coerceAtLeast(capabilities.exposureTimeRangeNs.first)
+        val focusMax = capabilities.maxFocusDistanceDiopters
+        return ManualControlValues(
+            exposureTimeNs = snapshot.exposureTimeNs.coerceIn(
+                capabilities.exposureTimeRangeNs.first,
+                exposureMax
+            ),
+            iso = snapshot.iso.coerceIn(
+                capabilities.sensitivityRange.first,
+                capabilities.sensitivityRange.last
+            ),
+            focusDistanceDiopters = if (focusMax != null && focusMax > 0f) {
+                (snapshot.focusDistanceDiopters ?: manualValues.focusDistanceDiopters)
+                    .coerceIn(0f, focusMax)
+            } else {
+                manualValues.focusDistanceDiopters
+            },
+            awbMode = snapshot.awbMode?.takeIf { mode ->
+                capabilities.whiteBalancePresets.any { it.awbMode == mode }
+            } ?: capabilities.whiteBalancePresets
+                .firstOrNull { it.awbMode == CaptureRequest.CONTROL_AWB_MODE_AUTO }
+                ?.awbMode
+                ?: manualValues.awbMode
+        )
+    }
+
+    /**
+     * Updates values and the manual flag before submitting a single repeating
+     * request, so no intermediate frame is rendered with stale defaults.
+     */
+    fun applyManualControls(enabled: Boolean, values: ManualControlValues) {
+        manualValues = values
+        manualControlsEnabled = enabled
+        submitRepeatingRequest()
+    }
+
+    /**
      * Sets a one-shot AF/AE metering region from normalized preview-buffer
      * coordinates (0..1) and triggers an AF scan. Only valid while the camera
      * is in Auto mode and the lens supports AF with metering regions.
@@ -384,7 +474,7 @@ class CameraStreamManager(context: Context) {
                 session.capture(builder.build(), null, cameraHandler)
                 builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
             }
-            session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            session.setRepeatingRequest(builder.build(), captureResultCallback, cameraHandler)
             Log.i(TAG_VIDEO_ENCODER, "Tap-to-focus triggered at region ${autoFocusRegion?.rect}")
         } catch (error: Exception) {
             Log.w(TAG_VIDEO_ENCODER, "Tap-to-focus request failed: ${error.message}", error)
@@ -529,8 +619,8 @@ class CameraStreamManager(context: Context) {
                             )
                             if (!formatReady.isCompleted) formatReady.complete(Unit)
                         },
-                        onEncodedData = { accessUnit, ptsUs, isKeyFrame ->
-                            server.dispatchSample(accessUnit, ptsUs, isKeyFrame)
+                        onEncodedData = { accessUnit, length, ptsUs, isKeyFrame ->
+                            server.dispatchSample(accessUnit, length, ptsUs, isKeyFrame)
                         }
                     )
                     isStreaming = true
@@ -879,14 +969,14 @@ class CameraStreamManager(context: Context) {
         val session = captureSession ?: return
         try {
             val builder = buildRequest() ?: return
-            session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            session.setRepeatingRequest(builder.build(), captureResultCallback, cameraHandler)
         } catch (error: Exception) {
             Log.w(TAG_VIDEO_ENCODER, "Repeating request failed: ${error.message}", error)
             if (allowFallback && manualControlsEnabled) {
                 manualControlsEnabled = false
                 val recovered = runCatching {
                     val builder = buildRequest() ?: return
-                    session.setRepeatingRequest(builder.build(), null, cameraHandler)
+                    session.setRepeatingRequest(builder.build(), captureResultCallback, cameraHandler)
                 }
                 if (recovered.isSuccess) {
                     Log.w(TAG_VIDEO_ENCODER, "Manual controls failed; fell back to automatic capture")
@@ -1092,7 +1182,7 @@ class CameraStreamManager(context: Context) {
         fps: Int,
         bitrate: Int,
         onFormatReady: (EncodedParameterSets) -> Unit,
-        onEncodedData: (ByteArray, Long, Boolean) -> Unit
+        onEncodedData: (ByteArray, Int, Long, Boolean) -> Unit
     ) {
         val encoder = configureEncoderWithFallback(codec, width, height, fps, bitrate)
         videoSurface = encoder.createInputSurface()
@@ -1101,6 +1191,10 @@ class CameraStreamManager(context: Context) {
 
         encoderJob = scope.launch {
             val bufferInfo = MediaCodec.BufferInfo()
+            // The RTSP dispatcher consumes the buffer synchronously, so one
+            // growing array can be reused for every frame instead of
+            // allocating a new access unit at 30 fps.
+            var accessUnit = ByteArray(64 * 1024)
             try {
                 while (isActive && isStreaming) {
                     val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, 10_000)
@@ -1143,14 +1237,21 @@ class CameraStreamManager(context: Context) {
                             if (outputBuffer != null && bufferInfo.size > 0) {
                                 outputBuffer.position(bufferInfo.offset)
                                 outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-                                val accessUnit = ByteArray(bufferInfo.size)
-                                outputBuffer.get(accessUnit)
+                                if (accessUnit.size < bufferInfo.size) {
+                                    accessUnit = ByteArray(bufferInfo.size)
+                                }
+                                outputBuffer.get(accessUnit, 0, bufferInfo.size)
                                 val isKeyFrame =
                                     (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
                                 val codecConfig =
                                     (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
                                 if (!codecConfig) {
-                                    onEncodedData(accessUnit, bufferInfo.presentationTimeUs, isKeyFrame)
+                                    onEncodedData(
+                                        accessUnit,
+                                        bufferInfo.size,
+                                        bufferInfo.presentationTimeUs,
+                                        isKeyFrame
+                                    )
                                 }
                             }
                             encoder.releaseOutputBuffer(outputIndex, false)
@@ -1364,6 +1465,13 @@ class CameraStreamManager(context: Context) {
         val optionalConfig: MediaFormat.() -> Unit
     )
 
+    private data class AutoCaptureSnapshot(
+        val exposureTimeNs: Long,
+        val iso: Int,
+        val focusDistanceDiopters: Float?,
+        val awbMode: Int?
+    )
+
     private suspend fun awaitPreviewSurface() {
         if (textureView == null) throw IllegalStateException(str(R.string.error_preview_view_not_attached))
         withTimeout(5_000) { surfaceReady.await() }
@@ -1440,6 +1548,7 @@ class CameraStreamManager(context: Context) {
         cameraDevice?.close()
         cameraDevice = null
         activeCameraId = null
+        latestAutoSnapshot = null
         releasePreviewSurfaceLocked()
     }
 

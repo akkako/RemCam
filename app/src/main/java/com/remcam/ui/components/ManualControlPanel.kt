@@ -331,7 +331,7 @@ private fun resetValue(
     ManualParameter.FOCUS -> values.copy(focusDistanceDiopters = 0f)
     ManualParameter.WHITE_BALANCE -> values.copy(
         awbMode = capabilities.whiteBalancePresets
-            .firstOrNull { it.awbMode == CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT }
+            .firstOrNull { it.awbMode == CaptureRequest.CONTROL_AWB_MODE_AUTO }
             ?.awbMode
             ?: capabilities.whiteBalancePresets.firstOrNull()?.awbMode
     )

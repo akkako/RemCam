@@ -103,6 +103,7 @@
     <!-- Settings: about -->
     <string name="section_about">关于</string>
     <string name="about_version">RemCam %1$s</string>
+    <string name="about_author">作者：akako</string>
     <string name="about_stack">Camera2 · MediaCodec H.264 / H.265 · 本地 RTSP 服务</string>
     <string name="about_stream">串流路径：/camera · Latin-1 安全的 RTP 载荷。无云端中转或外部服务器。</string>
 

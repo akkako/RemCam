@@ -276,8 +276,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
         openedCameraId = null
         _uiState.value = nextState
         engine.setTorch(false)
-        engine.updateManualControls(manualValues)
-        engine.setManualControlsEnabled(manualMode)
+        engine.applyManualControls(manualMode, manualValues)
         saveSettings(nextState)
         if (reopen) openPreviewForCurrentCamera(force = true)
     }
@@ -294,10 +293,18 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
                 // Tapping the already selected Manual segment toggles the panel.
                 _uiState.update { it.copy(manualPanelVisible = !it.manualPanelVisible) }
             } else {
-                engine.setManualControlsEnabled(true)
-                engine.updateManualControls(state.manualValues)
+                // Start from what Auto is currently doing so the first manual
+                // frame keeps the same exposure, ISO, focus and white balance.
+                val capabilities = capabilitiesFor(state.selectedCameraId)
+                val baseline = engine.snapshotAutoManualValues() ?: state.manualValues
+                val values = clampManualValues(baseline, capabilities, state.selectedFps.fps)
+                engine.applyManualControls(enabled = true, values = values)
                 _uiState.update {
-                    it.copy(manualMode = true, manualPanelVisible = true)
+                    it.copy(
+                        manualMode = true,
+                        manualPanelVisible = true,
+                        manualValues = values
+                    )
                 }
             }
         } else {
@@ -667,7 +674,7 @@ class RemCamViewModel(application: Application) : AndroidViewModel(application) 
             manual.sensitivityRange.last
         )
         val awb = manual.whiteBalancePresets
-            .firstOrNull { it.awbMode == CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT }
+            .firstOrNull { it.awbMode == CaptureRequest.CONTROL_AWB_MODE_AUTO }
             ?.awbMode
             ?: manual.whiteBalancePresets.firstOrNull()?.awbMode
         return ManualControlValues(

@@ -9,10 +9,10 @@ RemCam 是一个把 Android 手机变成局域网 RTSP 摄像头的应用：使�
 - **TCP / UDP 客户端**：支持 RTP/AVP/TCP interleaved 和 RTP/AVP UDP，多个客户端可同时连接。
 - **可选 Basic 认证**：设置用户名/密码后，客户端需要认证才能拉流。
 - **后台串流**：前台服务保活；按 Home、锁屏后相机、编码器和 RTSP 服务继续运行。
-- **多镜头选择**：底部快门左侧的镜头菜单直接选择 Camera2 相机（主摄、超广角、前摄等），设置页会列出当前相机支持的录制参数。
+- **多镜头选择**：顶部左上角的镜头菜单直接选择 Camera2 相机（主摄、超广角、前摄等），设置页会列出当前相机支持的录制参数。
 - **相机控制**：手电筒、点击对焦（自动模式）、双指缩放、+/- 变焦。
-- **手动模式**：ISO、曝光时间、手动对焦、白平衡预设；支持实时调整。
-- **相机风格 UI**：竖屏全屏预览、浮层控件、顶部左侧 Auto/Manual 小胶囊与底部居中快门。
+- **手动模式**：ISO、曝光时间、手动对焦、白平衡预设；从自动切到手动时以当前自动曝光/ISO/对焦/白平衡为起点，可在此基础上微调。手动对焦范围按当前相机上报的能力值（无穷远到最近对焦距离）限制。
+- **相机风格 UI**：竖屏全屏预览、浮层控件、顶部左侧镜头菜单、底部左侧 Auto/Manual 小胶囊与底部居中快门。
 - **网络地址管理**：列出 Wi-Fi / USB tethering 等本地 IPv4 地址，可刷新、复制 RTSP URL。
 
 ## 环境要求
@@ -51,7 +51,23 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:installDebug
 ```
 
+构建 Release APK（开启 R8 代码压缩/混淆、资源收缩和 PNG 优化，并移除调试日志）：
+
+```bash
+./gradlew :app:assembleRelease
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+发布版通过 ProGuard 规则移除 `Log.v/d/i` 调用，只保留 `Log.w/e`；APK 不含 `android:debuggable` 标志，体积约为 Debug 版的十分之一。
+
 > Release 构建目前复用 debug 签名配置（见 `app/build.gradle.kts`）。正式发布前请替换为自己的签名。
+
+## 性能
+
+- 编码输出复用同一个访问单元缓冲区，30 fps 下不再每帧分配大块 `ByteArray`。
+- RTSP 发送端直接按偏移量引用 NAL 单元，零拷贝拆分；TCP 将一帧的所有 RTP 包拼进缓冲区后只执行一次 socket 写入和 flush，UDP 也复用包缓冲区。
+- 网络 socket 使用 512 KB 发送缓冲，关键帧突发时不易阻塞编码线程。
+- Release 构建启用 R8 与资源收缩，并剥离调试/信息级日志。
 
 ## 使用方法
 
@@ -91,8 +107,8 @@ rtsp://username:password@192.168.1.10:8554/camera
 ## UI 说明
 
 - 竖屏锁定，全屏显示相机画面。
-- 顶部：左侧 Auto/Manual 小胶囊（与变焦胶囊同尺寸）、中间状态胶囊（`Ready / Live / Starting / Stopping / Error` + 相机/分辨率）、右侧手电筒（有闪光灯时）和设置入口。
-- 底部为浮层控件：左侧镜头菜单、居中快门、右侧变焦胶囊；相机切换只通过底部左侧镜头菜单完成。
+- 顶部：左侧镜头菜单、中间状态胶囊（`Ready / Live / Starting / Stopping / Error` + 相机/分辨率）、右侧手电筒（有闪光灯时）和设置入口。
+- 底部为浮层控件：左侧 Auto/Manual 小胶囊（与变焦胶囊同尺寸）、居中快门、右侧变焦胶囊；相机切换只通过顶部左侧镜头菜单完成。
 - 开始串流后顶部短暂显示 RTSP URL 横幅，可一键复制。
 - 手动模式会展开圆角手动控制卡片：参数 chip + 滑杆，支持 Reset 和收起。
 

@@ -105,6 +105,7 @@
     <!-- Settings: about -->
     <string name="section_about">ABOUT</string>
     <string name="about_version">RemCam %1$s</string>
+    <string name="about_author">Author: akako</string>
     <string name="about_stack">Camera2 · MediaCodec H.264 / H.265 · local RTSP server</string>
     <string name="about_stream">Stream path: /camera · Latin-1-safe RTP payload. No cloud relay or external server.</string>
 
