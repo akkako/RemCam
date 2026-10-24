@@ -3,9 +3,8 @@ package com.remcam.streaming
 import com.remcam.VideoCodec
 
 import android.util.Log
-import java.io.BufferedReader
+import java.io.BufferedInputStream
 import java.io.EOFException
-import java.io.InputStreamReader
 import java.net.BindException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -144,12 +143,18 @@ class RtspServer(
 
     private inner class ClientConnection(private val socket: Socket) {
         private val outputLock = Any()
-        private val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+        private val input = BufferedInputStream(socket.getInputStream())
         private val output = socket.getOutputStream()
         private val sessionId = UUID.randomUUID().toString()
         private val ssrc = Random.nextInt().toLong() and 0xffffffffL
         private var cSeq: String = "1"
         private var sequenceNumber = Random.nextInt(0, 65_535)
+
+        private var rtpPacketCount = 0L
+        private var rtpOctetCount = 0L
+        private var lastRtpTimestamp = 0L
+        private var lastRtpWallClockNanos = 0L
+        private var lastRtcpSentNanos = 0L
 
         @Volatile
         private var transportSession: TransportSession? = null
@@ -285,6 +290,9 @@ class RtspServer(
                 )
             }
             transport.endAccessUnit()
+            lastRtpTimestamp = timestamp and 0xFFFFFFFFL
+            lastRtpWallClockNanos = System.nanoTime()
+            maybeSendRtcp(transport)
         }
 
         private fun sendNalUnit(
@@ -331,7 +339,8 @@ class RtspServer(
                     (if (last) 0x40 else 0x00) or
                     nalType).toByte()
                 buildRtpHeader(timestamp, marker && last)
-                transport.sendRtp(
+                sendRtpPacket(
+                    transport = transport,
                     header = rtpHeader,
                     prefix = fuPrefix,
                     prefixLength = 2,
@@ -379,7 +388,8 @@ class RtspServer(
                     (if (last) 0x40 else 0x00) or
                     nalType).toByte()
                 buildRtpHeader(timestamp, marker && last)
-                transport.sendRtp(
+                sendRtpPacket(
+                    transport = transport,
                     header = rtpHeader,
                     prefix = fuPrefix,
                     prefixLength = 3,
@@ -402,7 +412,8 @@ class RtspServer(
         ) {
             if (payloadLength <= 0) return
             buildRtpHeader(timestamp, marker)
-            transport.sendRtp(
+            sendRtpPacket(
+                transport = transport,
                 header = rtpHeader,
                 prefix = null,
                 prefixLength = 0,
@@ -410,6 +421,27 @@ class RtspServer(
                 payloadOffset = payloadOffset,
                 payloadLength = payloadLength
             )
+        }
+
+        private fun sendRtpPacket(
+            transport: TransportSession,
+            header: ByteArray,
+            prefix: ByteArray?,
+            prefixLength: Int,
+            payload: ByteArray,
+            payloadOffset: Int,
+            payloadLength: Int
+        ) {
+            transport.sendRtp(
+                header = header,
+                prefix = prefix,
+                prefixLength = prefixLength,
+                payload = payload,
+                payloadOffset = payloadOffset,
+                payloadLength = payloadLength
+            )
+            rtpPacketCount++
+            rtpOctetCount += (prefixLength + payloadLength).toLong()
         }
 
         private fun buildRtpHeader(timestamp: Long, marker: Boolean) {
@@ -426,6 +458,62 @@ class RtspServer(
             rtpHeader[9] = (ssrc shr 16).toByte()
             rtpHeader[10] = (ssrc shr 8).toByte()
             rtpHeader[11] = ssrc.toByte()
+        }
+
+        private fun maybeSendRtcp(transport: TransportSession) {
+            if (!playing) return
+            val rtpWallClock = lastRtpWallClockNanos
+            if (rtpWallClock == 0L) return
+            val now = System.nanoTime()
+            if (lastRtcpSentNanos != 0L && now - lastRtcpSentNanos < RTCP_INTERVAL_NS) {
+                return
+            }
+            val elapsed = (now - rtpWallClock).coerceAtLeast(0L)
+            val rtpNow = (lastRtpTimestamp + elapsed * 90_000L / 1_000_000_000L) and
+                0xFFFFFFFFL
+            transport.sendRtcp(buildRtcpSenderReport(rtpNow, System.currentTimeMillis()))
+            lastRtcpSentNanos = now
+        }
+
+        /**
+         * Compound RTCP packet: Sender Report followed by SDES with CNAME.
+         * The SR gives the client an authoritative NTP <-> RTP mapping.
+         */
+        private fun buildRtcpSenderReport(
+            rtpTimestamp: Long,
+            wallClockMillis: Long
+        ): ByteArray {
+            val cname = "RemCam-${ssrc.toString(16)}"
+                .toByteArray(StandardCharsets.US_ASCII)
+            val sdesChunkLength = 4 + 2 + cname.size + 1
+            val sdesLength = (sdesChunkLength + 3) and -4
+            val packet = ByteArray(RTCP_SR_SIZE + RTCP_SDES_HEADER_SIZE + sdesLength)
+
+            packet[0] = 0x80.toByte()
+            packet[1] = RTCP_PT_SENDER_REPORT.toByte()
+            putUInt16(packet, 2, 6)
+            putUInt32(packet, 4, ssrc)
+            val ntpSeconds = wallClockMillis / 1000L + NTP_EPOCH_OFFSET_SECONDS
+            val ntpFraction = ((wallClockMillis % 1000L) shl 32) / 1000L
+            putUInt32(packet, 8, ntpSeconds)
+            putUInt32(packet, 12, ntpFraction)
+            putUInt32(packet, 16, rtpTimestamp)
+            putUInt32(packet, 20, rtpPacketCount)
+            putUInt32(packet, 24, rtpOctetCount)
+
+            var offset = RTCP_SR_SIZE
+            packet[offset] = 0x81.toByte()
+            packet[offset + 1] = RTCP_PT_SOURCE_DESCRIPTION.toByte()
+            putUInt16(packet, offset + 2, sdesLength / 4)
+            offset += RTCP_SDES_HEADER_SIZE
+            putUInt32(packet, offset, ssrc)
+            offset += 4
+            packet[offset++] = 1 // CNAME item
+            packet[offset++] = cname.size.toByte()
+            System.arraycopy(cname, 0, packet, offset, cname.size)
+            offset += cname.size
+            packet[offset] = 0 // END item; remaining bytes are zero padding
+            return packet
         }
 
         private fun sendInterleavedData(data: ByteArray, length: Int) {
@@ -530,7 +618,7 @@ class RtspServer(
                 status = "200 OK",
                 headers = listOf(
                     "Session: $sessionId",
-                    "RTP-Info: url=${normalizedTrackUrl()};seq=$sequenceNumber;rtptime=0"
+                    "RTP-Info: url=${normalizedTrackUrl()};seq=$sequenceNumber"
                 )
             )
         }
@@ -592,11 +680,12 @@ class RtspServer(
         }
 
         private fun readRequest(): RtspRequest? {
-            val requestLine = reader.readLine() ?: return null
+            val requestLine = readLineSkippingInterleaved() ?: return null
             if (requestLine.isBlank()) return null
             val headers = linkedMapOf<String, String>()
             while (true) {
-                val line = reader.readLine() ?: throw EOFException("Unexpected EOF while reading RTSP headers")
+                val line = readLineSkippingInterleaved()
+                    ?: throw EOFException("Unexpected EOF while reading RTSP headers")
                 if (line.isBlank()) break
                 val separator = line.indexOf(':')
                 if (separator > 0) {
@@ -606,14 +695,14 @@ class RtspServer(
             }
             val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
             val body = if (contentLength > 0) {
-                val buffer = CharArray(contentLength)
+                val bytes = ByteArray(contentLength)
                 var readTotal = 0
                 while (readTotal < contentLength) {
-                    val read = reader.read(buffer, readTotal, contentLength - readTotal)
+                    val read = input.read(bytes, readTotal, contentLength - readTotal)
                     if (read == -1) break
                     readTotal += read
                 }
-                String(buffer, 0, readTotal)
+                String(bytes, 0, readTotal, StandardCharsets.UTF_8)
             } else {
                 null
             }
@@ -627,6 +716,49 @@ class RtspServer(
                 headers = headers,
                 body = body
             )
+        }
+
+        /**
+         * Reads an RTSP line while consuming any client-to-server interleaved
+         * RTCP frames. VLC sends RTCP receiver reports on the same TCP socket,
+         * so a plain line reader would otherwise desynchronise the stream.
+         */
+        private fun readLineSkippingInterleaved(): String? {
+            while (true) {
+                var value = input.read()
+                if (value == -1) return null
+                if (value == '$'.code) {
+                    skipInterleavedFrame()
+                    continue
+                }
+                val line = StringBuilder()
+                while (value != -1 && value != '\n'.code) {
+                    if (value != '\r'.code) line.append(value.toChar())
+                    value = input.read()
+                }
+                return line.toString()
+            }
+        }
+
+        private fun skipInterleavedFrame() {
+            val channel = input.read()
+            val lengthHigh = input.read()
+            val lengthLow = input.read()
+            if (channel < 0 || lengthHigh < 0 || lengthLow < 0) {
+                throw EOFException("Unexpected EOF while reading interleaved frame")
+            }
+            var remaining = (lengthHigh shl 8) or lengthLow
+            while (remaining > 0) {
+                val skipped = input.skip(remaining.toLong())
+                if (skipped > 0) {
+                    remaining -= skipped.toInt()
+                } else {
+                    if (input.read() == -1) {
+                        throw EOFException("Unexpected EOF while reading interleaved frame")
+                    }
+                    remaining--
+                }
+            }
         }
 
         private fun logRequest(request: RtspRequest) {
@@ -724,6 +856,7 @@ private sealed interface TransportSession {
         payloadLength: Int
     )
     fun endAccessUnit() = Unit
+    fun sendRtcp(packet: ByteArray)
     fun close()
 }
 
@@ -782,6 +915,17 @@ private class TcpTransportSession(
         sender(data, length)
     }
 
+    override fun sendRtcp(packet: ByteArray) {
+        require(packet.size <= 0xFFFF) { "RTCP packet too large: ${packet.size}" }
+        val frame = ByteArray(4 + packet.size)
+        frame[0] = '$'.code.toByte()
+        frame[1] = rtcpChannel.toByte()
+        frame[2] = ((packet.size shr 8) and 0xFF).toByte()
+        frame[3] = (packet.size and 0xFF).toByte()
+        System.arraycopy(packet, 0, frame, 4, packet.size)
+        sender(frame, frame.size)
+    }
+
     private fun ensureCapacity(required: Int) {
         if (required <= frameBuffer.size) return
         var newSize = frameBuffer.size
@@ -830,6 +974,10 @@ private class UdpTransportSession(
         }
         System.arraycopy(payload, payloadOffset, packetBuffer, offset, payloadLength)
         rtpSocket.send(DatagramPacket(packetBuffer, packetLength, address, clientRtpPort))
+    }
+
+    override fun sendRtcp(packet: ByteArray) {
+        rtcpSocket.send(DatagramPacket(packet, packet.size, address, clientRtcpPort))
     }
 
     override fun close() {
@@ -932,9 +1080,27 @@ private fun findStartCode(buffer: ByteArray, offset: Int, length: Int): Int {
     return -1
 }
 
+private fun putUInt16(destination: ByteArray, offset: Int, value: Int) {
+    destination[offset] = (value shr 8).toByte()
+    destination[offset + 1] = value.toByte()
+}
+
+private fun putUInt32(destination: ByteArray, offset: Int, value: Long) {
+    destination[offset] = (value shr 24).toByte()
+    destination[offset + 1] = (value shr 16).toByte()
+    destination[offset + 2] = (value shr 8).toByte()
+    destination[offset + 3] = value.toByte()
+}
+
 private const val RTP_HEADER_SIZE = 12
 private const val RTP_PAYLOAD_TYPE = 96
 private const val RTP_PAYLOAD_LIMIT = 1_400
+private const val RTCP_SR_SIZE = 28
+private const val RTCP_SDES_HEADER_SIZE = 4
+private const val RTCP_PT_SENDER_REPORT = 200
+private const val RTCP_PT_SOURCE_DESCRIPTION = 202
+private const val RTCP_INTERVAL_NS = 2_000_000_000L
+private const val NTP_EPOCH_OFFSET_SECONDS = 2_208_988_800L
 private const val TAG_RTSP_SERVER = "RTSP_SERVER"
 private const val TAG_VIDEO_ENCODER = "VIDEO_ENCODER"
 private const val TAG_CLIENT_CONNECTION = "CLIENT_CONNECTION"
