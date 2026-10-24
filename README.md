@@ -1,5 +1,8 @@
 # RemCam
 
+[![Build Release APK](https://github.com/akkako/RemCam/actions/workflows/android-release.yml/badge.svg)](https://github.com/akkako/RemCam/actions/workflows/android-release.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 RemCam 是一个把 Android 手机变成局域网 RTSP 摄像头的应用：使用 Camera2 采集画面，MediaCodec 编码 H.264 或 H.265（设备支持硬件编码时），在手机本地启动 RTSP/RTP 服务，局域网内的播放器（VLC、ffplay、GStreamer 等）可以直接拉流。
 
 ## 功能
@@ -55,12 +58,21 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ```bash
 ./gradlew :app:assembleRelease
-adb install -r app/build/outputs/apk/release/app-release.apk
+adb install -r "$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' | head -n 1)"
 ```
 
 发布版通过 ProGuard 规则移除 `Log.v/d/i` 调用，只保留 `Log.w/e`；APK 不含 `android:debuggable` 标志，体积约为 Debug 版的十分之一。
 
 > Release 构建目前复用 debug 签名配置（见 `app/build.gradle.kts`）。正式发布前请替换为自己的签名。
+
+### GitHub Actions 自动构建
+
+推送到 `main` 或推送 `v*` 标签时，GitHub Actions 会自动构建通用 Release APK；也可以在 Actions 页面手动运行工作流。
+
+- 通用 APK 同时包含 `arm64-v8a` 和 `armeabi-v7a`（以及 `x86`/`x86_64`）原生库，没有 ABI 拆分。
+- 工作流结束后可在对应的 Actions 运行记录中下载 `RemCam-release-*` artifact。
+- 推送 `v*` 标签时，APK 会自动附加到同名的 GitHub Release。
+- 工作流文件：`.github/workflows/android-release.yml`。
 
 ## 性能
 
@@ -206,4 +218,6 @@ ffprobe -v error -rtsp_transport tcp \
 
 ## License
 
-本项目暂未指定开源许可证。
+本项目基于 [Apache License 2.0](LICENSE) 开源。
+
+Copyright 2026 akako
