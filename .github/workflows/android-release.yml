@@ -40,7 +40,7 @@ jobs:
           SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -n 1)
           echo "Using sdkmanager: $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          "$SDKMANAGER" --install "platform-tools" "platforms;android-37" "build-tools;36.0.0"
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-37.0" "build-tools;36.0.0"
           echo "sdk.dir=$SDK_ROOT" > local.properties
 
       - name: Cache debug keystore
